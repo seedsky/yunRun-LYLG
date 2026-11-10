@@ -1,0 +1,11 @@
+{
+ "coordinate_system": "GCJ-02",
+ "pace_min_km": 5.0,
+ "cadence_spm": 170,
+ "sample_seconds": 2,
+ "seed": "auto",
+ "source_json": "tasks_lylg/tasklist_0.json",
+ "distance_m": 2000,
+ "allowed_polygon_geojson": "./fence_lylg.geojson",
+ "cards_from": "tasks_lylg/tasklist_0.json"
+}

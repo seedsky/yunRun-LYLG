@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>云运动 · 洛阳理工</title><link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/vendor/leaflet.css"><link rel="stylesheet" href="/static/style.css">
+<script>window.__BOOT__=__BOOTSTRAP__;</script>
+<script defer src="/static/vendor/leaflet.js"></script><script defer src="/static/vendor/qrcode.js"></script>
+<script type="module" src="/static/app.js"></script></head>
+<body>
+<a class="skip" href="#main">跳到主要内容</a>
+<aside class="sidebar">
+  <a class="brand" href="/"><img src="/static/mark.svg" alt=""><span>云运动<small>洛阳理工 · 本地工作台</small></span></a>
+  <div class="nav-caption">我的工作区</div>
+  <nav aria-label="主要导航">
+    <button class="nav-item active" data-page="work"><span data-icon="route"></span>路线工作台</button>
+    <button class="nav-item" data-page="library"><span data-icon="library"></span>路线库<span class="nav-count" id="library-count">0</span></button>
+    <button class="nav-item" data-page="records"><span data-icon="clock"></span>跑步记录</button>
+    <button class="nav-item" data-page="account"><span data-icon="user"></span>账号与设置</button>
+    <button class="nav-item" data-page="backup"><span data-icon="backup"></span>数据备份</button>
+    <button class="nav-item" data-page="capture"><span data-icon="signal"></span>抓包助手</button>
+  </nav>
+  <div class="sidebar-bottom"><div class="theme-switch" aria-label="界面主题">
+    <button data-theme-choice="light" title="亮色主题" aria-label="亮色主题"><span data-icon="sun"></span></button>
+    <button data-theme-choice="system" title="跟随系统" aria-label="跟随系统"><span data-icon="monitor"></span></button>
+    <button data-theme-choice="dark" title="暗色主题" aria-label="暗色主题"><span data-icon="moon"></span></button>
+  </div><a class="local-link" id="mode-link" href="/offline"><span data-icon="tool"></span><span>打开独立工具</span><span aria-hidden="true">↗</span></a>
+  <small class="local-note">本地运行 · 数据保存在此电脑</small></div>
+</aside>
+<main id="main">
+  <header class="topbar"><div><div class="eyebrow" id="mode-label">校园运动 / 本地工作台</div><h1 id="page-title">路线工作台</h1><p id="page-subtitle">调整参数，查看路线，再开始执行。</p></div>
+    <div class="top-actions"><span class="mode-badge" id="demo-badge" hidden>本地演示</span><button class="account-pill" id="account-pill"><span class="avatar" data-icon="user"></span><span id="account-label">正在读取</span><span class="status-dot"></span></button></div>
+  </header>
+  <div class="notice" id="global-notice" hidden role="status"></div>
+
+  <section id="login-panel" class="login-panel" hidden>
+    <div class="login-art"><span class="large-mark" data-icon="route"></span><span class="eyebrow">准备好，开始新的一程</span><h2>先登录，<br>再安排你的路线。</h2><p>学校任务与规则自动同步。路线预览、参数调整与执行，在一个工作台完成。</p><div class="login-feature"><span data-icon="shield"></span>账号密码使用本机 Windows 用户加密保存</div><a href="/offline">只处理本地路线？打开独立工具 ↗</a></div>
+    <form id="login-form" class="login-form"><span class="eyebrow">账号登录</span><h2>欢迎回来</h2><p class="muted">洛阳理工学院 · 云运动账号</p>
+      <label>学号<input id="login-user" autocomplete="username" placeholder="填写官方 App 使用的学号" required></label>
+      <label>密码<div class="password-wrap"><input id="login-password" type="password" autocomplete="current-password" required><button type="button" id="password-toggle" aria-label="显示密码" title="显示密码"><span data-icon="eye"></span></button></div></label>
+      <div class="inline-error" id="login-error" role="alert" hidden></div>
+      <button class="btn primary wide" type="submit">登录并获取任务 <span aria-hidden="true">→</span></button>
+      <p class="fine">优先复用有效 token；失效时尝试自动登录一次。失败后等待你操作，不连续重试。</p>
+      <div class="login-alternatives"><button class="text-button" type="button" id="retry-login">重试自动登录</button><button class="text-button" type="button" id="login-capture">使用抓包助手</button></div>
+    </form>
+  </section>
+
+  <section class="page" id="page-work">
+    <div class="task-strip"><span class="live-dot"></span><label for="task-select">当前任务</label><select id="task-select" aria-label="选择服务器任务"></select><span class="rules-stamp" id="rule-stamp">本地默认规则 · 尚未同步</span><button class="text-button" id="refresh-rules"><span data-icon="refresh"></span>同步规则</button></div>
+    <div class="workspace">
+      <section class="card controls"><div class="section-title"><h2>路线设置</h2><span class="tag" id="source-tag">随机生成</span></div>
+        <fieldset id="parameter-fields">
+          <label>路线来源<select id="source"><option value="synth">随机生成</option><option value="library">已有路线</option><option value="history">历史记录</option><option value="draw">手绘路线</option></select></label>
+          <div id="source-options" hidden><label>选择路线<select id="source-id"></select></label><div class="row wrap"><button class="text-button" id="import-route">导入路线文件</button><button class="text-button" id="fetch-history" hidden>读取线上记录</button></div></div>
+          <div class="draw-hint" id="draw-hint" hidden><span data-icon="pen"></span><div class="draw-info">在右侧地图点击绘制路线。<b id="draw-count">已绘制 0 个点</b><div class="draw-metrics"><div><small>草稿距离</small><strong id="draw-distance">0.000 公里</strong></div><div><small>按当前配速估时</small><strong id="draw-time">00:00</strong></div><div><small>距离草稿起点</small><strong id="draw-gap">0 米</strong></div></div><p id="draw-target-note" class="fine">至少添加两个点，地图内会实时累计距离。</p><div class="row wrap"><button class="text-button" id="draw-use-distance" disabled>按已绘距离填写目标</button><button class="text-button" id="resume-draw">继续绘制</button></div><small>草稿按点击顺序测距；最终生成可能吸附打卡点，以预览统计为准。</small></div></div>
+          <label>目标里程<div class="input-unit"><input id="km" type="number" min="0.01" step="0.1" value="2.0"><span>公里</span></div></label>
+          <div id="pace-group"><label>目标平均配速</label><div class="pace-input"><div class="input-unit"><input id="pace-min" type="number" min="0" max="59" value="5" aria-label="配速分钟"><span>分</span></div><div class="input-unit"><input id="pace-sec" type="number" min="0" max="59" value="30" aria-label="配速秒"><span>秒</span></div><span>/ 公里</span></div></div>
+          <div id="duration-group" hidden><label>目标时长<div class="input-unit"><input id="duration" type="number" min="0.1" step="0.5" value="11"><span>分钟</span></div></label></div>
+          <button class="text-button small" id="input-mode">改用时长填写</button>
+          <div class="duration-summary"><span id="derived-label">预计时长</span><strong id="derived-value">11 分 00 秒</strong></div>
+          <label>目标步频<div class="input-unit"><input id="cadence" type="number" min="1" step="1" value="170"><span>步 / 分</span></div></label>
+          <div class="fluctuation"><span data-icon="chart"></span><span id="fluctuation-label">沿途配速起伏已开启</span><span class="mini-dot"></span></div>
+          <details class="advanced"><summary><span data-icon="sliders"></span>高级设置<span class="chevron">⌄</span></summary><div class="advanced-body">
+            <label>配速起伏<select id="amp"><option value="0.6">平缓</option><option value="1" selected>正常</option><option value="1.5">明显</option><option value="0">关闭</option></select></label>
+            <label>随机种子<input id="seed" type="number" placeholder="留空，每次不同"><span class="fine">填写相同数字，可复现相同结果。</span></label>
+            <label>轨迹点间隔<select id="interval"><option value="1">1 秒</option><option value="2" selected>2 秒</option><option value="3">3 秒</option><option value="5">5 秒</option></select></label>
+            <label class="checkbox"><input type="checkbox" id="deform">基于已有 / 历史路线生成形变</label>
+            <label class="checkbox"><input type="checkbox" id="fast">快速执行（跳过本地节奏等待）</label>
+          </div></details>
+        </fieldset>
+        <div class="route-errors" id="route-errors" role="alert" hidden></div>
+        <div class="control-actions"><button class="btn primary wide" id="generate"><span data-icon="spark"></span>生成并预览</button><div class="two-buttons"><button class="btn secondary" id="preview-only"><span data-icon="eye"></span>仅预览</button><button class="btn secondary" id="save-route" disabled><span data-icon="bookmark"></span>保存路线</button></div></div>
+        <p class="fine with-icon"><span data-icon="info"></span><span>临时预览无需保存，即可直接执行。</span></p>
+      </section>
+      <div class="result-column">
+        <div class="metrics"><div class="metric"><span><i data-icon="pin"></i>里程</span><strong id="metric-km">—<small>km</small></strong></div><div class="metric"><span><i data-icon="timer"></i>平均配速</span><strong id="metric-pace">—</strong></div><div class="metric"><span><i data-icon="clock"></i>预计时长</span><strong id="metric-duration">—</strong></div><div class="metric"><span><i data-icon="steps"></i>步频</span><strong id="metric-cadence">—</strong></div></div>
+        <section class="card map-card"><div class="map-toolbar"><div><span class="map-title">路线预览</span><span class="tag" id="preview-tag">尚未生成</span></div><div class="row"><label class="checkbox small"><input id="show-preview" type="checkbox" checked>参考路线</label><button class="text-button" id="blank-map">空白地图</button><label class="checkbox small"><input id="basemap" type="checkbox" checked>地图底图</label><button class="icon-button" id="fit-map" title="适应路线" aria-label="适应路线"><span data-icon="expand"></span></button><button class="icon-button" id="export-preview" title="导出当前路线" aria-label="导出当前路线" disabled><span data-icon="download"></span></button></div></div>
+          <div class="map-wrap"><div id="draw-live" class="draw-live" aria-live="polite" hidden><strong id="draw-live-distance">已绘 0.000 公里</strong><span id="draw-live-points">0 个点 · 最近一段 0 米</span><span id="draw-live-time">按当前配速约 00:00</span></div><div id="map" aria-label="校园路线地图"></div><canvas id="fallback-map" hidden aria-label="离线路线示意图"></canvas><div class="map-empty" id="map-empty"><span data-icon="route"></span><strong>从这里，预览下一条路线</strong><span>选择来源和参数，点击“生成并预览”</span></div><div class="map-offline" id="map-offline" hidden>底图未加载 · 轨迹与绘制仍可使用</div><div class="draw-tools" id="draw-tools" hidden><button class="btn secondary" id="undo-draw">撤销一点</button><button class="btn secondary" id="clear-draw">清空</button><button class="btn primary" id="finish-draw">完成绘制</button></div></div>
+          <div class="map-footer"><span><i class="legend-line"></i>当前路线</span><span><i class="legend-dot"></i>服务器 / 本地点位</span><span><i class="legend-draw"></i>手绘草稿（橙色虚线）</span><span id="point-summary">尚无轨迹数据</span></div>
+        </section>
+        <section class="card chart-card"><div class="section-title"><h2>配速变化</h2><span class="muted small" id="chart-summary">生成后显示沿途起伏</span></div><div id="pace-chart" class="pace-chart"><div class="chart-placeholder">沿途有快有慢，平均配速由目标值控制</div></div></section>
+        <div class="dirty-notice" id="dirty-notice" hidden><span data-icon="info"></span>参数已修改，需重新生成预览后才能执行。</div>
+        <section class="card execution-card"><div class="execution-state"><span class="ready-icon" data-icon="check"></span><div><strong id="execution-label">等待路线预览</strong><small id="execution-detail">生成或选择一条路线后，即可演练或执行。</small></div></div><div class="execution-actions"><button class="btn secondary" id="drill" disabled>本地演练</button><button class="btn primary" id="execute" disabled><span data-icon="play"></span>正式执行</button><button class="btn danger" id="stop-job" hidden>停止任务</button></div><div class="run-progress" id="run-progress" hidden><div><span id="run-stage"></span><strong id="run-percent"></strong></div><progress id="progress" max="100" value="0"></progress></div></section>
+        <section class="card job-result" id="job-result" hidden><h2 id="result-title"></h2><p id="result-grade"></p><p id="result-message"></p><button class="btn secondary" id="check-records">查看跑步记录核对</button></section>
+        <details class="card log-card" id="logs"><summary><span data-icon="terminal"></span>执行日志<span class="tag" id="job-badge">尚未执行</span><span class="chevron">⌄</span></summary><div class="log-tools"><span class="fine" id="log-relation">中断后保留最后确认位置，不自动续跑。</span><button class="text-button" id="export-log">导出脱敏日志</button></div><div id="log-output" class="colored-logs" role="log" aria-live="polite">暂无执行日志。</div></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="page-library" hidden><div class="card page-card"><div class="section-title"><div><h2>我的路线</h2><p class="muted">保存你满意的结果，也可以导入任务表或 GeoJSON。</p></div><button class="btn primary" id="library-import"><span data-icon="plus"></span>导入路线</button></div><div class="library-filters"><button class="filter active" data-filter="all">全部</button><button class="filter" data-filter="library">已保存</button><button class="filter" data-filter="history">历史记录</button><button class="filter" data-filter="sample">内置示例</button></div><div id="route-list" class="route-list"></div></div></section>
+
+  <section class="page" id="page-records" hidden><div class="card page-card"><div class="section-title"><div><h2>当前与历史跑步记录</h2><p class="muted">只读查询服务器记录，不创建或上传跑步数据。列表字段不完整时，可点击详情核对。</p></div><button class="btn primary" id="records-refresh">查询 / 刷新记录</button></div><div class="record-controls"><label>学期<select id="record-term"><option>查询后选择学期</option></select></label><label>成绩筛选<select id="record-filter"><option value="">全部记录</option><option value="passed">有效（达标）</option><option value="failed">无效（不达标）</option><option value="unknown">待确认</option><option value="pending">待审核</option><option value="running">进行中</option></select></label><button class="text-button" id="record-code-settings">状态码中文解释</button></div><p class="fine" id="records-updated">尚未查询。请点击“查询 / 刷新记录”。</p><p class="fine" id="records-count"></p><div class="record-table-wrap"><table class="record-table"><thead><tr><th>跑步时间</th><th>成绩状态</th><th>里程</th><th>跑了多久</th><th>配速</th><th>操作</th></tr></thead><tbody id="records-table"></tbody></table></div><p id="records-empty" class="route-empty">暂无记录数据。</p></div></section>
+  <section class="page" id="page-account" hidden><div class="settings-grid"><section class="card page-card"><h2>账号与登录状态</h2><div class="account-summary"><span class="avatar large" data-icon="user"></span><div><strong id="settings-account">未登录</strong><p class="muted" id="settings-auth-state">账号密码在此电脑加密保存。</p></div></div><div class="row wrap"><button class="btn secondary" id="settings-login">登录 / 更换账号</button><button class="btn danger subtle" id="logout">退出并清除凭据</button></div><p class="fine">退出会清除本机密码和 token，保留账号名、个人设置和路线。关闭网页不会退出账号。</p></section><section class="card page-card"><h2>外观与本地设置</h2><label>界面主题<select id="theme-setting"><option value="system">跟随 Windows 系统</option><option value="light">运动活力 · 亮色</option><option value="dark">深色工作台 · 暗色</option></select></label><label>单次时长上限（本地配置）<div class="input-unit"><input id="max-minutes" type="number" min="1" max="1440" value="20"><span>分钟</span></div></label><p class="fine">此项为本地补充限制，不标作服务器实时规则。</p><button class="btn secondary" id="save-preferences">保存设置</button></section></div>
+    <section class="card page-card"><div class="section-title"><div><h2>当前任务规则</h2><p class="muted">服务器值、本地配置与未确认字段分别标记。</p></div><button class="btn secondary" id="settings-refresh">重新同步</button></div><div class="rules-grid" id="rules-grid"></div></section>
+    <details class="card page-card developer"><summary><span data-icon="tool"></span>高级 / 开发者设置<span class="chevron">⌄</span></summary><p class="fine">学校地址、设备标识和协议参数。密钥留空保留原值；账号密码不在这里保存。旧版范围偏移仅供兼容，新工作台直接使用服务器原始范围。</p><div id="advanced-config"></div><button class="btn secondary" id="save-advanced">保存高级配置</button></details>
+  </section>
+
+  <section class="page" id="page-backup" hidden><div class="backup-hero card"><span class="backup-icon" data-icon="backup"></span><div><span class="eyebrow">换电脑，也能继续</span><h2>带走设置与路线，<br>不带走登录密码。</h2><p>备份包含账号、token、个人设置和本地路线。新电脑可先复用有效 token，失效后再输入账号密码。</p></div></div><div class="settings-grid"><section class="card page-card"><h2>导出数据备份</h2><p class="muted">直接导出 JSON 文件，不设置备份密码。文件含 token，请自行保管。</p><button class="btn primary" id="export-backup"><span data-icon="download"></span>导出备份</button><p class="fine">不包含程序、Python 环境、登录密码、抓包 CA 私钥及执行日志。</p></section><section class="card page-card"><h2>选择性导入</h2><p class="muted">分别选择账号、设置和路线；遇到同名路线，默认自动改名保留两份。</p><button class="btn secondary" id="import-backup"><span data-icon="upload"></span>选择备份文件</button></section></div></section>
+
+  <section class="page" id="page-capture" hidden><div class="card page-card"><div class="section-title"><div><h2>抓包备用登录</h2><p class="muted">手机安装 Super Proxy，电脑运行抓包代理。先连通，再配置。</p></div><span class="tag" id="capture-status">尚未启动</span></div><div class="capture-steps">
+    <section class="capture-step"><span class="step-number">1</span><div><h3>检测手机与电脑是否互通</h3><p>同一个校园网不保证互通。选择手机能访问的电脑地址，用手机扫码打开测试页。</p><div class="capture-connect"><div id="capture-qr" class="qr"></div><div><label>电脑地址<select id="capture-address"></select></label><a id="capture-url" href="#" target="_blank" rel="noopener">正在准备测试页</a><p id="network-status" class="muted">等待手机打开测试页。</p></div></div><details><summary>无法连接？</summary><p class="fine">检查电脑防火墙是否允许当前网络访问本程序。校园网可能存在客户端隔离；可尝试电脑热点或其他互通网络。手机热点与 USB 共享需按实际设备测试，不假定一定可用。</p></details></div></section>
+    <section class="capture-step"><span class="step-number">2</span><div><h3>启动代理，配置手机 Super Proxy</h3><div class="row wrap"><button class="btn primary" id="capture-start">启动抓包代理</button><button class="btn secondary" id="capture-stop">停止抓包</button></div><div class="proxy-values" id="proxy-values">启动后显示本机地址与端口。</div><p class="fine">在手机软件中新建代理，选择 SOCKS5，填写上一步的电脑地址及对应端口，然后启动连接。系统代理方案作为待实测的备用项保留在说明文档中。</p><a id="apk-url" href="#" target="_blank" rel="noopener">用手机下载附带的 Super Proxy APK ↗</a></div></section>
+    <section class="capture-step"><span class="step-number">3</span><div><h3>安装当前电脑生成的 CA 证书</h3><p>用手机测试页下载证书，按手机系统的“安装 CA 证书”入口安装。证书只适用于当前抓包环境，换电脑需使用新电脑的证书。</p><a id="certificate-url" class="btn secondary" href="#" target="_blank" rel="noopener">下载当前 CA 证书</a><p class="fine">部分 App 不信任用户 CA，安装后仍可能无法解密，需实机验证。工具不附带旧环境证书，也不分发配套私钥。</p></div></section>
+    <section class="capture-step"><span class="step-number">4</span><div><h3>打开云运动，等待捕获</h3><p id="token-capture-status">在官方 App 完成登录并进入首页。抓到 token 后隔离加密保存并停止代理，验证账号后启用。</p><button class="btn primary" id="capture-complete">验证登录状态并进入工作台</button><p class="fine">完成后关闭手机 Super Proxy；不再需要时，可删除本次安装的 CA 证书。抓包会话经服务器核实属于同一学号时保留已存密码；换号时不继承原账号密码。</p></div></section>
+  </div></div></section>
+  <footer class="footer"><span>云运动 · 洛阳理工</span><span>关闭网页继续运行 · 关闭控制台退出程序</span></footer>
+</main>
+<dialog id="modal"><form method="dialog" id="modal-form"><div class="modal-heading"><h2 id="modal-title"></h2><button class="icon-button" value="cancel" aria-label="关闭">×</button></div><div id="modal-body"></div><div class="modal-actions"><button class="btn secondary" value="cancel">取消</button><button class="btn primary" id="modal-ok" value="ok">确认</button></div></form></dialog>
+<div id="toast" class="toast" role="status" hidden></div><input type="file" id="file-picker" accept=".json,.geojson" hidden>
+</body></html>

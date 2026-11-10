@@ -1,0 +1,37 @@
+{
+  "msg": "操作成功",
+  "code": 200,
+  "data": {
+    "qualifiedCount": 3,
+    "distance": 6.05,
+    "totalMileage": 60.0,
+    "cralist": [
+      {
+        "id": 619,
+        "schoolId": 197,
+        "raType": "T3",
+        "raTaskType": "A2",
+        "raStatus": "Y",
+        "raRunArea": "school:run:task:197:1890310131181043716:R0:1:1:619",
+        "raDislikes": 5,
+        "raMinDislikes": 3,
+        "raSingleMileageMin": 2.0,
+        "raSingleMileageMax": 5.0,
+        "raCadenceMin": 35,
+        "raCadenceMax": 350,
+        "raPaceMin": 3.0,
+        "raPaceMax": 10.0,
+        "raMaxTime": 1200,
+        "raTargetNum": 30,
+        "raMileageNum": 60.0,
+        "dayStartTime": "06:00",
+        "dayEndTime": "22:00",
+        "raStartTime": "2026-10-10",
+        "raEndTime": "2027-01-08",
+        "runFaceStatus": "N",
+        "points": "112.417622,34.612324|112.417504,34.612702|112.417381,34.613091|112.418457,34.612537|112.418401,34.612969|112.418265,34.613424",
+        "fence": "112.413904,34.611019|112.416887,34.607354|112.424578,34.611668|112.422518,34.62002"
+      }
+    ]
+  }
+}
