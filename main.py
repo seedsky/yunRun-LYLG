@@ -236,7 +236,7 @@ def parse_args():
     parser.add_argument('-f', '--config_path', type=str, default=None,
                         help='配置文件路径（相对路径按调用者工作目录解析；缺省为项目根 config.ini）')
     parser.add_argument('-t', '--task_path', type=str, default=None,
-                        help='任务文件路径（相对路径按调用者工作目录解析；缺省为项目根 tasks_lylg）')
+                        help='任务文件路径（相对路径按调用者工作目录解析；面板生成的任务表目录）')
     parser.add_argument('-a', '--auto_run', action='store_true', help='自动跑步，默认打表')
     parser.add_argument('-d', '--drift', action='store_true', help='是否添加漂移')
     parser.add_argument('--route-config', default=None,
@@ -585,6 +585,19 @@ def _build_finish_body(record_mileage_km, recode_cadence, recode_pace, recode_di
     return body
 
 
+def _card_strings(raw):
+    """任务下发打卡点的两种编码：文本 "lon,lat|lon,lat" 或二维数组。"""
+    if isinstance(raw, list):
+        out = []
+        for item in raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                out.append(f'{item[0]},{item[1]}')
+            elif isinstance(item, str) and item.strip():
+                out.append(item.strip())
+        return out
+    return [part.strip() for part in str(raw or '').split('|') if part.strip()]
+
+
 class Yun_For_New:
 
     def __init__(self, auto_generate_task=False, client: YunClient = None, home_info=None,
@@ -634,13 +647,20 @@ class Yun_For_New:
                 "按未通过处理，自动流程已停止。")
         self.runFaceStatus = face_status or 'N'
 
-        self.raType = data['raType']
-        self.raId = data['id']
+        self.raType = data.get('raType')
+        self.raId = data.get('id')
         self.strides = strides
-        self.schoolId = data['schoolId']
-        self.raRunArea = data['raRunArea']
-        self.raDislikes = data['raDislikes']
-        self.raMinDislikes = data['raDislikes']
+        self.schoolId = data.get('schoolId')
+        self.raRunArea = data.get('raRunArea')
+        # 部分学校不下发点数字段：保持“未知”，只在用到时按 0 兜底，不伪造具体含义。
+        self.raDislikes = data.get('raDislikes')
+        self.raMinDislikes = data.get('raMinDislikes', self.raDislikes)
+        missing = [key for key in ('id', 'raType', 'raRunArea', 'schoolId', 'raSingleMileageMin',
+                                   'raSingleMileageMax', 'raCadenceMin', 'raCadenceMax')
+                   if data.get(key) is None or data.get(key) == '']
+        if missing:
+            raise DecodeException('当前任务缺少执行必需字段：' + '、'.join(missing)
+                                  + '；该学校可能使用不同协议或任务结构。')
         self.raSingleMileageMin = data['raSingleMileageMin'] + single_mileage_min_offset
         self.raSingleMileageMax = data['raSingleMileageMax'] + single_mileage_max_offset
         self.server_min_mileage_km = float(data['raSingleMileageMin'])
@@ -662,9 +682,7 @@ class Yun_For_New:
             raise ValueError('上传批次至少需要两个点')
         self.raCadenceMin = data['raCadenceMin'] + cadence_min_offset
         self.raCadenceMax = data['raCadenceMax'] + cadence_max_offset
-        points = data['points'].split('|')
-        # 学校下发的 6 个卡片坐标：合成轨迹要踩到的就是这些（打卡判定口径 20 m）
-        self.card_points = [c.strip() for c in points if c.strip()]
+        self.card_points = _card_strings(data.get('points'))
         if auto_generate_task:
             # 如果只要打表，完全可以不执行下面初始化代码
             self.my_select_points = ""
@@ -674,7 +692,7 @@ class Yun_For_New:
                 self.my_select_points = tmp["mypoints"]
                 self.my_point = tmp["origin_point"]
             for my_select_point in self.my_select_points:  # 手动取点
-                if my_select_point in points:
+                if my_select_point in self.card_points:
                     print(my_select_point + " 存在")
                 else:
                     print(my_select_point + " 不存在")
@@ -703,7 +721,7 @@ class Yun_For_New:
 
     def generate_task(self, points):
         for point_index, point in enumerate(points):
-            if self.now_dist / 1000 < min_distance or self.myLikes < self.raMinDislikes:  # 里程不足或者点不够
+            if self.now_dist / 1000 < min_distance or self.myLikes < int(self.raMinDislikes or 0):  # 里程不足或者点不够
                 self.manageList.append({
                     'point': point,
                     'marked': 'Y',
@@ -726,7 +744,7 @@ class Yun_For_New:
             index = 0
             while self.now_dist / 1000 < min_distance:
                 self.add_task(self.manageList[index]['point'])
-                index = (index + 1) % self.raDislikes
+                index = (index + 1) % max(1, int(self.raDislikes or 0))
 
     # 每10个路径点作为一组splitPoint;
     # 若最后一组不满10个且多于1个，则将最后一组中每两个点位分取10点（含终点而不含起点），作为一组splitPoint
@@ -1021,7 +1039,7 @@ class Yun_For_New:
             raise ValueError("生成步频不在任务允许范围")
         if self.upload_batch_size < 2:
             raise ValueError("生成模式上传批次至少为 2 点")
-        if int(self.raDislikes) > 0:
+        if int(self.raDislikes or 0) > 0:
             self._validate_cards(data)
 
     def _validate_cards(self, data):
@@ -1030,13 +1048,13 @@ class Yun_For_New:
         cards = [tuple(map(float, c.split(','))) for c in getattr(self, 'card_points', []) if c]
         listed = data.get('manageList') or []
         hits = [m for m in listed if str(m.get('marked', '')).upper() == 'Y']
-        need = min(len(cards), max(int(self.raMinDislikes or 0), int(self.raDislikes))) if cards else int(self.raDislikes)
+        need = min(len(cards), max(int(self.raMinDislikes or 0), int(self.raDislikes or 0))) if cards else int(self.raDislikes or 0)
         need = max(1, need)
         if len(hits) < need:
             raise ValueError(
                 f"生成轨迹只踩到 {len(hits)} 个打卡点（任务要求至少 {need} 个）。"
-                "改用 --route-config 的 cards/cards_from（参考 examples/routes/deform_lylg.json），"
-                "或直接走打表任务表 -t tasks_lylg。")
+                "或改用 --route-config 的 cards/cards_from（参考 examples/routes/deform_lylg.json），"
+                "或先用面板生成打表任务，再用 -t 指定任务目录。")
         for item in hits:
             try:
                 declared = tuple(map(float, str(item['point']).split(',')))
@@ -1613,6 +1631,8 @@ def build_face_runner(args, sleep=None, frame_provider=None):
 
 def run_dry(cfg_path: str, task_path: str, args):
     """离线演练：本地 fixture + FakeTransport；不登录、不探测学校、不调高德、不 sleep、不写配置。"""
+    if not task_path:
+        raise ValueError('本地演练需要任务目录：请用 -t 指定（可用面板生成一份打表任务）。')
     home_path = args.dry_home or (_CONF.get("Run", "dry_home", fallback="") or None)
     home_path = resolve_cli_path(home_path) if home_path else project_resource("dry_run_home.json")
     if not os.path.exists(home_path):
@@ -1729,7 +1749,7 @@ def main(run=True):
     # 几何预检在账号配置、登录、getHomeRunInfo 和 start 之前完成。
     args.generated_task = yun_route.generate(resolve_cli_path(route_path)) if route_path else None
     cfg_path = resolve_cli_path(args.config_path) if args.config_path else project_resource("config.ini")
-    task_path = resolve_cli_path(args.task_path) if args.task_path else project_resource("tasks_lylg")
+    task_path = resolve_cli_path(args.task_path) if args.task_path else None
 
     # 设置全局变量（快照）并构建统一客户端
     user_info = set_args(cfg_path)
@@ -1796,8 +1816,8 @@ def main(run=True):
             if print_table == 'y':
                 if not args.auto_run:
                     print("warning:\n打表模式下\n跑步的步频、配速等信息受tasklist.json控制，不会读取map.json，config.ini的跑步信息失效")
-                    choice = input("任务目录（回车=tasks_lylg；也可直接输入目录名）").strip()
-                    path = "./" + choice if choice else "./tasks_lylg"
+                    choice = input("任务目录（回车=tasks；也可直接输入目录名）").strip()
+                    path = choice if choice else "./tasks"
                     if legacy_drift_choice:
                         print("[弃用警告] 你选择了老式漂移：仅 ≈0.1mm 刚性平移，服务端近重复检测下基本无效；"
                               "需要真实偏移请改用轨迹来源 [2] 合成轨迹。")
@@ -1811,6 +1831,9 @@ def main(run=True):
                     Yun.do_by_points_map(path=path, isDrift=driftChoice)
                     Yun.finish_by_points_map()
                 else:
+                    if not task_path:
+                        print("[提示] 自动打表需要任务目录：请用 -t 指定（面板生成的打表任务），或改用面板执行。")
+                        return
                     path = task_path
                     Yun = Yun_For_New(auto_generate_task=False,
                                       face_runner=build_face_runner(args))

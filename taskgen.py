@@ -431,7 +431,7 @@ def generate(count=2, km=2.0, pace_min=5.0, pace_max=5.0, cad_min=170.0, cad_max
     if not (50 <= cad_min <= cad_max <= 250):
         raise TaskgenError(f"步频 {cad_min:g}-{cad_max:g} 超出 50-250")
 
-    out_dir = Path(out or (ROOT / "tasks_lylg"))
+    out_dir = Path(out or (ROOT / "tasks"))
     out_dir.mkdir(parents=True, exist_ok=True)
     existing = sorted(out_dir.glob("tasklist_*.json"))
     start_idx = 0 if replace else len(existing)
@@ -479,7 +479,7 @@ def generate(count=2, km=2.0, pace_min=5.0, pace_max=5.0, cad_min=170.0, cad_max
 
 
 def generate_to_dir(**kwargs):
-    """generate() 的别名，语义更清楚：写到 tasks_lylg 目录。"""
+    """generate() 的别名，语义更清楚：写到 tasks 目录。"""
     return generate(**kwargs)
 
 def main():
@@ -497,7 +497,7 @@ def main():
     ap.add_argument("--cadence", type=int, default=170)
     ap.add_argument("--seed", type=int, default=None, help="给第 1 份的种子，后面每份 +1")
     ap.add_argument("--amp", type=float, default=1.0, help="配速起伏强度 0.6 平缓 / 1.0 正常 / 1.5 明显")
-    ap.add_argument("--out", default=str(ROOT / "tasks_lylg"))
+    ap.add_argument("--out", default=str(ROOT / "tasks"))
     ap.add_argument("--preview", default=None, help="导出第 1 份的 geojson 路径")
     ap.add_argument("--max-minutes", type=float, default=20.0, help="该校规则：单次跑步上限（分钟）")
     ap.add_argument("--from-history", default=None, help="历史路线目录（tools/fetch_history.py 产物）")

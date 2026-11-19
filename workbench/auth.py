@@ -72,7 +72,7 @@ class Auth:
             self.store.save_credentials({'schema_version': 1, 'username': str(username).strip(),
                 'password': password, 'token': data['token'], 'device_id': p.device_id,
                 'device_name': p.device_name, 'sys_version': p.sys_version,'session_source':'password'})
-            self.store.save_settings({'account_name': str(username).strip()})
+            self.store.save_settings({'account_name': str(username).strip(), 'autologin': True})
             if previous.get('username') != str(username).strip():
                 (self.store.data / 'rules.json').unlink(missing_ok=True)
                 (self.store.data / 'records.json').unlink(missing_ok=True)
@@ -106,7 +106,7 @@ class Auth:
             if not same:
                 (self.store.data/'records.json').unlink(missing_ok=True)
                 self.store.save_settings({'task_id':''})
-            self.store.save_settings({'account_name':username})
+            self.store.save_settings({'account_name':username,'autologin':True})
             self._cache_rules(tasks,saved)
             (self.store.data/'captured-session.dpapi').unlink(missing_ok=True)
             self.authenticated=True;self.restore_attempted=True;self.relogin_attempt_token=None;self.error=''
@@ -155,17 +155,53 @@ class Auth:
             if self.restore_attempted: return
             try:
                 cred = self.store.credentials()
+                auto = self.store.settings().get('autologin', True) is not False
                 if cred.get('token'): self.refresh()
-                elif cred.get('password'): self.login(cred.get('username', ''), cred['password'])
+                elif auto and cred.get('password'): self.login(cred.get('username', ''), cred['password'])
             except Exception as exc:
                 self.authenticated = False
                 self.error = self.store.safe_message(exc)
             finally:
                 self.restore_attempted = True
 
-    def logout(self):
+    def login_saved(self, username):
+        """用本机保存的密码登录指定学号（不读界面上的密码框）。"""
+        username = str(username or '').strip()
+        item = self.store.credentials_for(username)
+        if not item.get('password'):
+            raise ValueError('这个学号没有保存密码，请手动输入密码或重新抓包。')
+        self.login(username, item['password'])
+
+    def forget(self, username):
+        """忘记一个已保存的账号（只删本机凭据，不动服务器）。"""
         with self.lock:
-            self.store.clear_credentials()
+            username = str(username or '').strip()
+            if not username: raise ValueError('请选择要忘记的账号。')
+            is_current = self.store.credentials().get('username') == username
+            self.store.remove_account(username)
+            if is_current:
+                self.authenticated = False
+                self.error = ''
+                (self.store.data / 'rules.json').unlink(missing_ok=True)
+                (self.store.data / 'records.json').unlink(missing_ok=True)
+
+    def logout(self, clear=True):
+        """退出登录。
+
+        clear=True 清除本机全部账号的密码与 token；clear=False 只丢弃当前账号的会话
+        token，保留加密保存的密码和学号，供登录页一键重登。两种方式都会把 autologin
+        关掉，避免刚退出就被自动登回去。
+        """
+        with self.lock:
+            current = self.store.credentials().get('username', '')
+            if clear:
+                self.store.clear_credentials()
+            else:
+                if current: self.store.update_account(current, token='')
+                (self.store.data / 'captured-session.dpapi').unlink(missing_ok=True)
+                (self.store.data / 'rules.json').unlink(missing_ok=True)
+                (self.store.data / 'records.json').unlink(missing_ok=True)
+            self.store.save_settings({'autologin': False})
             self.authenticated = False
             self.restore_attempted = True
             self.error = ''

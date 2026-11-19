@@ -382,7 +382,7 @@ main {
 .task-strip select {
   max-width:245px;
   border:0;
-  background:transparent;
+  background-color:transparent;
   height:32px;
   padding:2px 24px 2px 0;
   font-size:12px;
@@ -1793,3 +1793,261 @@ html[data-theme=dark] .grade-unknown,html[data-theme=dark] .grade-pending,html[d
 .map-toolbar {height:auto;min-height:47px;gap:8px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px;}
 .map-toolbar .row {flex-wrap:wrap;}
 .map-footer {flex-wrap:wrap;}
+
+
+/* 场地提示与本地检查 */
+.rule-extra {
+  margin-top:14px;
+  padding:12px 14px;
+  border-left:3px solid var(--accent);
+  background:var(--surface2);
+  border-radius:0 8px 8px 0;
+  font-size:12px;
+  line-height:1.9;
+}
+.rule-extra p {
+  margin:0;
+}
+.rule-extra p + p {
+  margin-top:4px;
+}
+.local-check {
+  margin-top:18px;
+  border-top:1px dashed var(--border);
+  padding-top:16px;
+}
+.local-check-head {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.local-check-head .checkbox {
+  margin:0;
+}
+.local-check-head .muted {
+  font-size:11px;
+}
+.local-check-head .spacer {
+  flex:1;
+}
+.check-grid {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px 12px;
+}
+.check-field {
+  margin:0;
+  font-size:12px;
+  font-weight:600;
+}
+.check-field span {
+  display:block;
+  color:var(--muted);
+  font-size:11px;
+  margin-bottom:5px;
+}
+.check-field input {
+  margin-top:0;
+}
+.issue {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+}
+.issue.notice {
+  color:var(--muted);
+}
+@media (max-width:900px) {
+  .check-grid {
+    grid-template-columns:repeat(2,1fr);
+  }
+}
+
+/* 下拉框统一外观：自定义箭头，任务栏里的下拉像一枚轻按钮 */
+select {
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236f857b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 11px center;
+  background-size:14px;
+  padding-right:34px;
+}
+[data-theme="dark"] select {
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239db3a9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+option {
+  background:var(--surface);
+  color:var(--text);
+}
+.task-strip select {
+  max-width:300px;
+  height:30px;
+  border:1px solid transparent;
+  border-radius:8px;
+  background-color:transparent;
+  background-repeat:no-repeat;
+  background-position:right 8px center;
+  background-size:13px;
+  padding:3px 26px 3px 9px;
+  font-size:12px;
+  font-weight:600;
+  color:var(--text);
+  box-shadow:none;
+}
+.task-strip select:hover {
+  border-color:var(--border);
+  background-color:var(--surface2);
+}
+.task-strip select:focus-visible {
+  border-color:var(--accent);
+}
+
+/* 服务器原始字段 */
+.raw-rules {
+  margin-top:14px;
+  border-top:1px dashed var(--border);
+  padding-top:12px;
+}
+.raw-rules summary {
+  font-size:12px;
+  color:var(--muted);
+  font-weight:600;
+}
+.raw-grid {
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:6px 18px;
+  margin-top:10px;
+}
+.raw-row {
+  display:flex;
+  gap:10px;
+  justify-content:space-between;
+  font-size:11px;
+  border-bottom:1px dotted var(--border);
+  padding:4px 0;
+}
+.raw-row code {
+  color:var(--muted);
+}
+.raw-row span {
+  font-family:ui-monospace,Consolas,monospace;
+  word-break:break-all;
+  text-align:right;
+}
+@media (max-width:900px) {
+  .raw-grid {
+    grid-template-columns:1fr;
+  }
+}
+
+/* 主页的场地警告：缺围栏、点位归属不明时直接拦在生成前 */
+.venue-banner {
+  margin:-6px 0 16px;
+  padding:10px 12px;
+  border-radius:8px;
+  background:var(--danger-tint);
+  color:var(--danger);
+  font-size:12px;
+  line-height:1.8;
+}
+.venue-banner p {
+  margin:0;
+}
+.venue-banner p + p {
+  margin-top:4px;
+}
+
+/* 已保存账号：登录页的快捷入口与账号页的列表 */
+.saved-accounts {
+  margin:14px 0 16px;
+  padding:12px 14px;
+  border:1px dashed var(--border);
+  border-radius:10px;
+}
+.saved-accounts .muted {
+  font-size:11px;
+}
+.account-chips {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:8px 0;
+}
+.account-chip {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border:1px solid var(--border);
+  border-radius:9px;
+  background:var(--surface);
+  color:var(--text);
+  font-size:12px;
+  cursor:pointer;
+}
+.account-chip:hover:not(:disabled) {
+  border-color:var(--accent);
+  color:var(--accent);
+}
+.account-chip:disabled {
+  opacity:.5;
+  cursor:not-allowed;
+}
+.chip-id {
+  font-weight:700;
+  letter-spacing:.3px;
+}
+.chip-action {
+  color:var(--muted);
+  font-size:11px;
+}
+.account-list {
+  margin-top:14px;
+  padding-top:14px;
+  border-top:1px dashed var(--border);
+  display:grid;
+  gap:8px;
+}
+.account-list > span {
+  font-size:11px;
+}
+.account-row {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  font-size:12px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:8px 10px;
+  flex-wrap:wrap;
+}
+.account-row code {
+  font-weight:600;
+}
+.account-row .muted {
+  font-size:11px;
+  margin-left:auto;
+}
+.account-row .row {
+  gap:10px;
+}
+.danger-text {
+  color:var(--danger);
+}
+
+/* 地图图例里的“运动范围”：紫色虚线 + 半透明遮罩 */
+.legend-fence {
+  width:18px;
+  height:10px;
+  border:2px dashed #7a6cf0;
+  background:rgba(122,108,240,.18);
+  border-radius:3px;
+}
+[data-theme="dark"] .legend-fence {
+  border-color:#a99cff;
+  background:rgba(169,156,255,.20);
+}

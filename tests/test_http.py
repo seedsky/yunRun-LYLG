@@ -67,5 +67,24 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertTrue(self.app.auth.authenticated)
 
+    def test_generate_keeps_other_saved_defaults(self):
+        self.request('/api/settings',{'defaults':{**self.app.store.settings()['defaults'],'fast':True,'fence_mask':False}})
+        self.assertEqual(self.request('/api/routes/generate',
+                         {'source':'synth','km':2,'pace':5.5,'cadence':170,'seed':7})[0],200)
+        defaults=self.app.store.settings()['defaults']
+        self.assertTrue(defaults['fast'])
+        self.assertFalse(defaults['fence_mask'])
+
+    def test_local_check_endpoint_saves_and_validates(self):
+        status,raw=self.request('/api/rules/limits',{'task_id':'619','enabled':True,'values':{'km_min':3}})
+        self.assertEqual(status,200)
+        view=json.loads(raw)
+        self.assertEqual(view['limits']['values']['km_min'],3)
+        self.assertTrue(view['limits']['customized'])
+        self.assertEqual(self.request('/api/rules/limits',
+                         {'task_id':'619','enabled':True,'values':{'km_min':9,'km_max':1}})[0],400)
+        self.assertEqual(self.request('/api/rules/limits',
+                         {'task_id':'619','enabled':True,'values':{'start':'99:99'}})[0],400)
+
 
 if __name__=='__main__':unittest.main()

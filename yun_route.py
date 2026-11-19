@@ -710,7 +710,7 @@ def extend_to(route, need_m):
 def resolve_resource(base_dir, rel):
     """相对路径解析：先按 cfg 所在目录，再按项目根兜底。
 
-    cfg 常放在 examples/routes/ 下（写 ../../tasks_lylg/… 在仓库里能跑），但整个
+    cfg 常放在 examples/routes/ 下（写相对的轨迹文件路径在仓库里能跑），但整个
     目录被拷到别处后层数就变了。路径在 cfg 目录找不到时再试项目根，两边都命中。
     """
     path = Path(rel)

@@ -4,8 +4,9 @@
  "cadence_spm": 170,
  "sample_seconds": 2,
  "seed": "auto",
- "source_json": "tasks_lylg/tasklist_0.json",
+ "source_json": "drawn_route_lylg.geojson",
  "distance_m": 2000,
  "allowed_polygon_geojson": "./fence_lylg.geojson",
- "cards_from": "tasks_lylg/tasklist_0.json"
+ "cards": [[112.417622, 34.612324], [112.417504, 34.612702], [112.417381, 34.613091],
+           [112.418457, 34.612537], [112.418401, 34.612969], [112.418265, 34.613424]]
 }

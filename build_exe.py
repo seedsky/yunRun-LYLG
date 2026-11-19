@@ -25,7 +25,7 @@ def main():
         '--version-file',str(version_file),'--collect-all','mitmproxy','--collect-all','gmssl','--collect-all','Crypto',
         '--hidden-import','mitmproxy_rs','--recursive-copy-metadata','mitmproxy','--copy-metadata','gmssl',
         '--copy-metadata','pycryptodome','--copy-metadata','requests','--copy-metadata','Pillow']
-    for item in ['static','examples','tasks_lylg','extras','config.ini','README.md','LICENSE','NOTICE.md','LICENSES']:
+    for item in ['static','examples','extras','config.ini','README.md','使用说明.md','LICENSE','NOTICE.md','LICENSES']:
         path=ROOT/item
         if path.exists():command+=['--add-data',str(path)+':'+(item if path.is_dir() else '.')]
     command+=['--add-data',str(ROOT/'tools/capture_bridge.py')+':tools',str(ROOT/'web.py')]

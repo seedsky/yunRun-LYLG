@@ -20,7 +20,7 @@ def source_paths():
     names=list(FILES)+list(TOOLS)+['.gitignore','启动联网面板.bat','启动独立工具.bat',
         '0-检查环境.bat','1-抓token.bat','2-打开面板.bat','extras/README.md']
     paths={ROOT/name for name in names}
-    for name in ['workbench','static','docs','examples','tasks_lylg','tests','LICENSES','launchers']:
+    for name in ['workbench','static','docs','examples','tests','LICENSES','launchers']:
         paths.update(p for p in (ROOT/name).rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix not in ('.pyc','.pyo'))
     return sorted(paths)
 

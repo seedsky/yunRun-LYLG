@@ -34,7 +34,7 @@ function showPage(page){
  document.querySelectorAll('[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
  $('page-title').textContent=titles[page][0];$('page-subtitle').textContent=titles[page][1];
  const login=page==='work'&&boot.mode==='online'&&(!S.data?.authenticated||S.forceLogin);
- $('login-panel').hidden=!login;if(login)$('page-work').hidden=true;
+ $('login-panel').hidden=!login;if(login){$('page-work').hidden=true;renderLogin();}
  if(page==='work')setTimeout(()=>map.fit(),30);
  if(page==='account')loadAdvanced();
  if(page==='capture')loadCapture();
@@ -58,7 +58,7 @@ async function run(button,operation){
  S.busy=true;button?.classList.add('busy');renderLock();
  try{return await operation();}
  catch(error){if(error.issues)renderIssues(error.issues);toast(error.message);}
- finally{S.busy=false;button?.classList.remove('busy');renderLock();}
+ finally{S.busy=false;button?.classList.remove('busy');renderLock();setCheckLocked(active());}
 }
 
 async function loadState(initial=false){
@@ -68,7 +68,8 @@ async function loadState(initial=false){
  $('account-pill').querySelector('.status-dot').style.opacity=S.data.authenticated?'1':'.3';
  $('settings-account').textContent=S.data.authenticated?S.data.account:'未登录';
  const session=S.data.session||{};
- $('settings-auth-state').textContent=boot.mode==='offline'?'独立工具不连接学校服务。':(S.data.auth_error||`${session.has_token?'Token 已加密保存':'尚未获得 token'} · ${session.has_password?'登录密码已保存':'未保存登录密码'} · 来源：${{password:'账号密码登录',capture:'手机抓包',existing:'已有会话'}[session.source]||'已有会话'}`);
+ const savedAccounts=S.data.accounts||[];
+ $('settings-auth-state').textContent=boot.mode==='offline'?'独立工具不连接学校服务。':(S.data.auth_error||(S.data.authenticated?`${session.has_token?'Token 已加密保存':'尚未获得 token'} · ${session.has_password?'登录密码已保存':'未保存登录密码'} · 来源：${{password:'账号密码登录',capture:'手机抓包',existing:'已有会话'}[session.source]||'已有会话'}`:`未登录 · 本机保存了 ${savedAccounts.length} 个账号${savedAccounts.length?'，可在登录页点学号一键登录':''}`));
  $('login-error').textContent=S.data.auth_error||'';$('login-error').hidden=!S.data.auth_error;
  $('login-user').value=S.data.settings.account_name||'';$('max-minutes').value=S.data.settings.max_minutes;
  $('library-count').textContent=S.data.sources.filter(v=>v.kind==='library').length;
@@ -78,8 +79,8 @@ async function loadState(initial=false){
               seed:S.data.settings.defaults.seed||''}:S.data.settings.defaults);
   if(p)renderPreview(p);
  }
- renderRules();fillSources();renderLibrary();renderJob(S.job);showPage(S.page);
- if(old&&S.preview&&JSON.stringify([old.rules.fields,old.rules.points,old.rules.selected_id])!==JSON.stringify([S.data.rules.fields,S.data.rules.points,S.data.rules.selected_id]))markDirty();
+ renderRules();fillSources();renderLibrary();renderJob(S.job);renderLogin();showPage(S.page);
+ if(old&&S.preview&&JSON.stringify([old.rules.fields,old.rules.points,old.rules.fence,old.rules.selected_id])!==JSON.stringify([S.data.rules.fields,S.data.rules.points,S.data.rules.fence,S.data.rules.selected_id]))markDirty();
  if(!S.data.rules.tasks.length&&S.data.authenticated&&boot.mode==='online')notice('服务器当前没有可用任务。你仍可在独立工具中处理本地路线。');
  else if(boot.demo)notice('本地演示模式：使用模拟任务与本地演练，不连接学校服务，不上传记录。');
  else if(S.job.status==='interrupted')notice('上次任务已中断，不自动续跑。请先读取线上历史记录，核对最后确认的位置。');
@@ -88,10 +89,16 @@ async function loadState(initial=false){
 function notice(text){$('global-notice').textContent=text;$('global-notice').hidden=!text;}
 
 function hydrate(params={}){
- $('source').value=params.source||'synth';$('km').value=params.km??2;
+ const sources=S.data?.sources||[];
+ // 上次用的来源如果已经没有对应路线（例如历史记录被删了），退回随机生成，避免一开就报错。
+ let source=params.source||'synth';
+ if((source==='library'||source==='history')&&!sources.some(item=>item.kind===source))source='synth';
+ $('source').value=source;$('km').value=params.km??2;
  setPace(params.pace??5.5);$('cadence').value=params.cadence??170;
  $('amp').value=String(params.amp??1);$('seed').value=params.seed??'';$('interval').value=String(params.sample_seconds??2);
- $('deform').checked=!!params.deform;sourceUI();derived();
+ $('deform').checked=!!params.deform;$('fast').checked=!!params.fast;
+ $('fence-mask').checked=params.fence_mask!==false;map.setMask($('fence-mask').checked);syncFenceLegend();
+ sourceUI();derived();
  if(params.source_id)$('source-id').value=params.source_id;
  if(params.source==='draw'&&params.drawn){map.drawing=params.drawn;map.updateDraw();renderDrawing();}
 }
@@ -103,6 +110,26 @@ function parameters(){
  return {source:$('source').value,source_id:$('source-id').value,km,pace:value,cadence:Number($('cadence').value),
   amp:Number($('amp').value),sample_seconds:Number($('interval').value),seed:$('seed').value,
   deform:$('deform').checked,drawn:map.drawing};
+}
+// 高级设置与快速模式改完就记住，不用先生成一次。
+let defaultsTimer;
+function persistDefaults(){
+ if(!S.data)return;
+ clearTimeout(defaultsTimer);
+ defaultsTimer=setTimeout(async()=>{
+  try{
+   const next={...S.data.settings.defaults,...parameters(),fast:$('fast').checked,fence_mask:$('fence-mask').checked};
+   delete next.drawn;delete next.source_id;
+   await api('/api/settings',{defaults:next});
+   S.data.settings.defaults=next;
+  }catch{}
+ },400);
+}
+$('parameter-fields').addEventListener('change',persistDefaults);
+$('parameter-fields').addEventListener('input',persistDefaults);
+$('fence-mask').onchange=()=>{map.setMask($('fence-mask').checked);syncFenceLegend();persistDefaults();};
+function syncFenceLegend(){
+ $('legend-fence-text').textContent=$('fence-mask').checked?'运动范围（紫色虚线 + 遮罩）':'运动范围（紫色虚线，遮罩已关）';
 }
 function derived(){
  try{const p=parameters();const seconds=p.km*p.pace*60;
@@ -152,7 +179,7 @@ function sourceUI(){
  map.setDrawing(source==='draw'&&!active()&&!S.busy);fillSources();renderLock();
 }
 $('source').onchange=sourceUI;
-$('fit-map').onclick=()=>map.fit();$('undo-draw').onclick=()=>map.undo();$('clear-draw').onclick=()=>map.clear();
+$('fit-map').onclick=()=>map.fit(true);$('undo-draw').onclick=()=>map.undo();$('clear-draw').onclick=()=>map.clear();
 $('show-preview').onchange=()=>map.showRoute($('show-preview').checked);
 $('blank-map').onclick=()=>{$('show-preview').checked=false;map.showRoute(false);toast('已隐藏参考路线，保留地图与手绘草稿；勾选“参考路线”即可恢复。');};
 $('finish-draw').onclick=()=>{map.setDrawing(false);toast('绘制已完成，点击“生成并预览”应用当前参数。');};
@@ -165,8 +192,10 @@ $('draw-use-distance').onclick=()=>{
 function renderIssues(issues=[]){
  $('route-errors').replaceChildren();$('route-errors').hidden=!issues.length;
  issues.forEach(issue=>{
-  const row=document.createElement('div');const text=document.createElement('div');text.textContent=issue.message;row.append(text);
-  if(Number.isFinite(issue.suggested)){
+  const row=document.createElement('div');const text=document.createElement('div');
+  row.className=issue.level==='notice'?'issue notice':'issue';
+  text.textContent=(issue.level==='notice'?'提示：':'')+issue.message;row.append(text);
+  if(issue.level!=='notice'&&Number.isFinite(issue.suggested)){
    const button=document.createElement('button');button.className='text-button';button.textContent='采用建议值';
    button.onclick=()=>{if(issue.field==='pace'){setPace(issue.suggested);if(S.inputMode==='duration')$('duration').value=(Number($('km').value)*issue.suggested).toFixed(2);}else if($(issue.field))$(issue.field).value=issue.suggested;markDirty();};row.append(button);
   }
@@ -212,19 +241,112 @@ $('save-route').onclick=()=>run($('save-route'),async()=>{
  const result=await api('/api/routes/save',{id:S.preview.id,name:$('route-name').value});await loadState();toast(`已保存：${result.name}`);
 });
 $('export-preview').onclick=()=>run($('export-preview'),async()=>download(await api('/api/previews/export',{id:S.preview.id,geojson:true}),'当前预览.geojson'));
+$('export-map').onclick=()=>run($('export-map'),()=>{
+ const r=S.data?.rules||{};
+ const task=(r.tasks||[]).find(t=>t.id===r.selected_id);
+ const title=[r.campus,task?.name].filter(Boolean).join(' · ')||'当前场地';
+ const m=S.preview?.metrics;
+ const subtitle=m?`${m.km.toFixed(2)} 公里 · 平均配速 ${pace(m.pace)} · 命中 ${m.cards} 个打卡点`:'尚未生成路线';
+ const shot=map.exportPng({title,subtitle});
+ const link=document.createElement('a');link.href=shot.url;
+ link.download=`${title.replace(/[\\/:*?"<>|]/g,'-')}-地图.png`;
+ document.body.append(link);link.click();link.remove();
+ toast(`已导出地图图片 ${shot.width}×${shot.height}。`);
+});
 
 function renderRules(){
  if(!S.data)return;const r=S.data.rules;const selected=r.selected_id;
- $('task-select').replaceChildren(...(r.tasks.length?(r.tasks.length>1?[new Option('请选择任务',''),...r.tasks.map(t=>new Option(t.name+' · '+t.type,t.id))]:r.tasks.map(t=>new Option(t.name,t.id))):[new Option('本地参考规则','')]));
+ const label=t=>[t.campus,t.name,t.id].filter(Boolean).join(' · ');
+ $('task-select').replaceChildren(...(r.tasks.length?(r.tasks.length>1?[new Option('请选择打卡区域',''),...r.tasks.map(t=>new Option(label(t),t.id))]:r.tasks.map(t=>new Option(label(t),t.id))):[new Option('本地参考规则','')]));
  $('task-select').value=selected;$('task-select').disabled=active()||r.tasks.length<=1;
  let stamp='本地配置 · 尚未同步';if(r.fetched_at){const time=new Date(r.fetched_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});stamp=`${boot.demo?'演示数据':(boot.mode==='offline'?'缓存':'服务器')} · ${time}`;}
- $('rule-stamp').textContent=stamp;map.guide(r.points);
+ const current=r.tasks.find(t=>t.id===selected);
+ if(current)stamp+=` · ${current.campus?current.campus+' · ':''}${current.name} · ${current.points} 点${current.fence?' / 有围栏':' / 未下发围栏'}`;
+ $('rule-stamp').textContent=stamp;map.guide(r.points,r.fence,r.selected_id);
  const fields=[['km_min','里程下限','公里'],['km_max','里程上限','公里'],['pace_min','配速下限','分钟/公里'],['pace_max','配速上限','分钟/公里'],['cadence_min','步频下限','步/分'],['cadence_max','步频上限','步/分'],['start','每日开始时间',''],['end','每日结束时间',''],['max_minutes','单次时长上限','分钟'],['face','人脸核验开关',''],['batch','上传批次阈值','']];
- $('rules-grid').innerHTML=fields.map(([key,name,unit])=>{const v=r.fields[key];return `<div class="rule-cell"><small>${name}</small><strong>${escape(v.value??'未确认')} <small style="display:inline">${unit}</small></strong><span class="tag">${escape(v.source)}</span></div>`;}).join('');
+ $('rules-grid').innerHTML=fields.map(([key,name,unit])=>{const v=r.fields[key];return `<div class="rule-cell"><small>${name}</small><strong>${escape(v.value??'未下发')} <small style="display:inline">${unit}</small></strong><span class="tag">${escape(v.source)}</span></div>`;}).join('');
+ // 学校下发的要求原文与当前区域提示
+ const extra=[];
+ if(r.campus)extra.push(`当前区域：${r.campus}${current?` · ${current.name}`:''}`);
+ if(r.requirements)extra.push(`学校要求原文：${r.requirements}`);
+ (r.venue_warnings||[]).forEach(w=>extra.push(`注意：${w}`));
+ if(selected&&!r.points.length)extra.push('当前区域没有可用的打卡点。');
+ if(selected&&!r.fence.length)extra.push('当前区域没有下发围栏：本地不做越界校验，生成路线时请自行核对。');
+ if(r.source==='unselected')extra.push('请在上方选择一个打卡区域后再生成路线。');
+ $('rule-extra').hidden=!extra.length;
+ $('rule-extra').replaceChildren(...extra.map(t=>{const p=document.createElement('p');p.textContent=t;return p;}));
+ // 区域范围缺失或点位归属不明时，在主页直接拦下来，而不是等生成后才报错。
+ const banner=[];
+ if(selected&&!r.fence.length)banner.push('当前区域没有下发范围（围栏），无法校验路线，已停止生成。请重新同步规则，或对照官方 App 核对。');
+ if(selected&&r.points_status==='ambiguous')banner.push('打卡点中有落在区域范围之外的点，归属需要核对；本地已停止生成。');
+ if(selected&&!r.points.length&&r.points_status!=='ambiguous')banner.push('当前区域没有下发打卡点，无法生成路线。');
+ $('venue-banner').hidden=!banner.length;
+ $('venue-banner').replaceChildren(...banner.map(t=>{const p=document.createElement('p');p.textContent=t;return p;}));
+ const raw=r.raw||[];
+ $('raw-rules').hidden=!raw.length;
+ $('raw-summary').textContent=`服务器原始字段（${raw.length} 项，未换算）`;
+ $('raw-grid').replaceChildren(...raw.map(row=>{
+  const cell=document.createElement('div');cell.className='raw-row';
+  const key=document.createElement('code');key.textContent=row.key;
+  const value=document.createElement('span');value.textContent=row.value;
+  cell.append(key,value);return cell;
+ }));
+ renderCheck(r);
 }
+const CHECK_FIELDS=[['km_min','里程下限','公里','number'],['km_max','里程上限','公里','number'],['pace_min','配速下限','分钟/公里','number'],['pace_max','配速上限','分钟/公里','number'],['cadence_min','步频下限','步/分','number'],['cadence_max','步频上限','步/分','number'],['start','开始时间','','time'],['end','结束时间','','time']];
+function setCheckLocked(locked){
+ const noTask=!S.data?.rules?.selected_id;
+ ['check-enabled','check-save','check-reset'].forEach(id=>{const el=$(id);if(el)el.disabled=!!locked||noTask;});
+ document.querySelectorAll('[data-check]').forEach(el=>{el.disabled=!!locked||noTask;});
+}
+function renderCheck(r){
+ if(!r)return;
+ const lim=r.limits||{enabled:true,values:{},missing:[]};
+ const locked=active();
+ $('check-enabled').checked=lim.enabled!==false;
+ $('check-enabled').disabled=locked||!r.selected_id;
+ $('check-save').disabled=locked||!r.selected_id;
+ $('check-reset').disabled=locked||!r.selected_id;
+ const missingNames=lim.missing.map(key=>CHECK_FIELDS.find(f=>f[0]===key)?.[1]||key);
+ const grid=CHECK_FIELDS.map(([key,name,unit,type])=>{
+  const wrap=document.createElement('label');wrap.className='check-field';
+  wrap.title=`${name}${lim.missing.includes(key)?'：服务器未下发，留空即不检查':'：留空即不检查'}`;
+  const title=document.createElement('span');title.textContent=unit?`${name}（${unit}）`:name;
+  const input=document.createElement('input');input.type=type;input.name=key;input.dataset.check=key;
+  if(type==='number'){input.step='any';input.min='0';}
+  input.value=lim.values[key]??'';
+  input.placeholder=lim.missing.includes(key)?'未下发':'';
+  input.disabled=locked||!r.selected_id;
+  wrap.append(title,input);return wrap;
+ });
+ $('check-grid').replaceChildren(...grid);
+ const state=lim.enabled===false?'已关闭：越界只提示，不拦截。':(lim.customized?'已自定义范围。':'使用服务器下发范围。');
+ $('check-hint').textContent=state;
+ $('check-missing').hidden=!missingNames.length;
+ $('check-missing').textContent=missingNames.length?`服务器未下发：${missingNames.join('、')}（留空即不检查）`:'';
+}
+function checkValues(){
+ const values={};
+ document.querySelectorAll('[data-check]').forEach(input=>{const value=input.value.trim();if(value!=='')values[input.dataset.check]=value;});
+ return values;
+}
+async function saveLimits(enabled,values){
+ const task=S.data?.rules?.selected_id;
+ if(!task)throw new Error('请先选择一个打卡区域。');
+ await api('/api/rules/limits',{task_id:task,enabled,values});
+ await loadState();
+}
+$('check-save').onclick=()=>run($('check-save'),async()=>{await saveLimits($('check-enabled').checked,checkValues());toast('已按当前任务保存本地检查范围。');});
+$('check-reset').onclick=()=>run($('check-reset'),async()=>{await saveLimits($('check-enabled').checked,{});toast('已恢复为服务器下发范围。');});
+$('check-enabled').onchange=()=>run($('check-enabled'),async()=>{await saveLimits($('check-enabled').checked,checkValues());toast($('check-enabled').checked?'本地检查已开启。':'本地检查已关闭，越界只提示。');});
 $('task-select').onchange=()=>run($('task-select'),async()=>{await api('/api/tasks/select',{id:$('task-select').value});markDirty();await loadState();});
 async function refreshRules(){await api('/api/rules/refresh',{});await loadState();toast('已获取当前服务器规则。');}
 $('refresh-rules').onclick=()=>run($('refresh-rules'),refreshRules);$('settings-refresh').onclick=()=>run($('settings-refresh'),refreshRules);
+$('open-rules').onclick=()=>{
+ showPage('account');
+ const card=document.querySelector('#local-check');
+ if(card)requestAnimationFrame(()=>card.scrollIntoView({block:'center',behavior:'smooth'}));
+};
 
 const statusLabels={idle:'尚未执行',starting:'准备中',running:'执行中',stopping:'正在停止',completed:'已完成',stopped:'已停止',failed:'执行失败',interrupted:'上次已中断'};
 function renderJob(job){
@@ -238,9 +360,11 @@ function renderJob(job){
 }
 function renderLock(){
  const locked=active()||S.busy;
- $('parameter-fields').disabled=locked;$('generate').disabled=locked;$('preview-only').disabled=locked;
+ $('parameter-fields').disabled=locked;$('generate').disabled=locked||!S.data?.rules?.fence?.length;$('preview-only').disabled=locked;
  $('save-route').disabled=locked||!S.preview||S.dirty;$('export-preview').disabled=!S.preview;
- const usable=!!S.preview&&!S.dirty&&!S.preview.issues?.length;
+ const blocking=(S.preview?.issues||[]).filter(issue=>issue.level!=='notice');
+ const usable=!!S.preview&&!S.dirty&&!blocking.length;
+ $('export-map').disabled=!(map.cards.length||map.fence.length||S.preview);
  $('drill').disabled=locked||!usable;
  $('execute').disabled=locked||!usable||!S.data?.authenticated||!S.data?.rules.selected_id||boot.demo;
  $('stop-job').disabled=S.busy||S.job.status==='stopping';
@@ -254,7 +378,7 @@ function renderLock(){
  renderResult(S.job,other);
  if(active()){$('execution-label').textContent=S.job.dry?'本地演练中':'任务执行中';$('execution-detail').textContent='当前路线与参数已锁定，关闭网页仍会继续运行。';map.setDrawing(false);}
  else if(S.dirty){$('execution-label').textContent='等待更新预览';$('execution-detail').textContent='参数已修改，请重新生成预览；无需保存路线。';}
- else if(S.preview){$('execution-label').textContent=S.preview.issues?.length?'路线需要调整':'路线已就绪';$('execution-detail').textContent=boot.mode==='offline'?'可进行本地演练，正式执行请打开联网面板。':(boot.demo?'演示模式只支持本地演练。':'本地演练可选，临时路线可直接正式执行。');}
+ else if(S.preview){$('execution-label').textContent=blocking.length?'路线需要调整':'路线已就绪';$('execution-detail').textContent=boot.mode==='offline'?'可进行本地演练，正式执行请打开联网面板。':(boot.demo?'演示模式只支持本地演练。':'本地演练可选，临时路线可直接正式执行。');}
  else{$('execution-label').textContent='等待路线预览';$('execution-detail').textContent='生成或选择一条路线后，即可演练或执行。';}
 }
 async function startJob(dry){const job=await api('/api/jobs/start',{id:S.preview.id,dry,fast:$('fast').checked});renderJob(job);$('logs').open=true;}
@@ -267,11 +391,18 @@ $('check-records').onclick=()=>{showPage('records');run($('records-refresh'),()=
 
 function renderLibrary(){
  if(!S.data)return;
+ $('library-fetch').disabled=boot.mode==='offline'||!S.data.authenticated;
+ $('library-fetch').title=boot.mode==='offline'?'独立工具不连接学校服务':(S.data.authenticated?'读取当前账号在服务器上的跑步记录，存成本机历史路线；只读取，不会新建或上传记录':'请先登录账号');
  const items=S.data.sources.filter(item=>S.filter==='all'||item.kind===S.filter),container=$('route-list');container.replaceChildren();
- if(!items.length){container.innerHTML='<div class="route-empty">这里还没有路线。生成满意的结果后，点击“保存路线”。</div>';return;}
+ if(!items.length){
+  container.innerHTML=S.filter==='history'
+   ?'<div class="route-empty">还没有下载过历史记录。点右上角「读取线上记录」，读取当前账号在服务器上的跑步记录。</div>'
+   :'<div class="route-empty">这里还没有路线。生成满意的结果后，点击“保存路线”。</div>';
+  return;
+ }
  items.forEach(item=>{
   const row=document.createElement('div');row.className='route-row';
-  row.innerHTML=`<span class="route-avatar" data-icon="route"></span><div><div class="route-name">${escape(item.name)}</div><div class="route-meta">${{sample:'内置示例',library:'已保存路线',history:'已下载历史记录'}[item.kind]} · ${item.points} 个轨迹点</div></div><div class="route-buttons"><button class="btn secondary" data-action="preview">预览</button><button class="icon-button" data-action="export" title="导出 GeoJSON" aria-label="导出路线"><span data-icon="download"></span></button>${item.kind!=='sample'?'<button class="text-button" data-action="delete">删除</button>':''}</div>`;
+  row.innerHTML=`<span class="route-avatar" data-icon="route"></span><div><div class="route-name">${escape(item.name)}</div><div class="route-meta">${item.kind==='history'?'已下载历史记录':'已保存路线'}${item.account?' · '+escape(item.account):''} · ${item.points} 个轨迹点</div></div><div class="route-buttons"><button class="btn secondary" data-action="preview">预览</button><button class="icon-button" data-action="export" title="导出 GeoJSON" aria-label="导出路线"><span data-icon="download"></span></button><button class="text-button" data-action="delete">删除</button></div>`;
   row.querySelector('[data-action=preview]').onclick=event=>run(event.currentTarget,async()=>{$('source').value=item.kind==='history'?'history':'library';sourceUI();$('source-id').value=item.id;await onlyPreview(item.id);showPage('work');});
   row.querySelector('[data-action=export]').onclick=event=>run(event.currentTarget,async()=>download(await api('/api/routes/export',{source_id:item.id,geojson:true}),item.name+'.geojson'));
   row.querySelector('[data-action=delete]')?.addEventListener('click',event=>run(event.currentTarget,async()=>{if(await modal('删除这条路线？',`<p class="modal-description">${escape(item.name)} 将移至本机 data/trash，内置示例不受影响。</p>`,'删除')){await api('/api/routes/delete',{id:item.id});await loadState();}}));
@@ -280,8 +411,14 @@ function renderLibrary(){
 }
 document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{S.filter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach(el=>el.classList.toggle('active',el===button));renderLibrary();});
 async function importRoute(){const file=await pickFile();if(!file)return;const result=await api('/api/routes/import',file);await loadState();toast('已导入：'+result.name);}
+async function pullHistory(){
+ const result=await api('/api/history/pull',{limit:20});
+ await loadState();
+ toast(`已读取 ${result.count} 条历史路线，每条都标了来源学号。`);
+}
 $('import-route').onclick=()=>run($('import-route'),importRoute);$('library-import').onclick=()=>run($('library-import'),importRoute);
-$('fetch-history').onclick=()=>run($('fetch-history'),async()=>{const result=await api('/api/history/pull',{limit:20});await loadState();toast(`已读取 ${result.count} 条历史路线。`);});
+$('fetch-history').onclick=()=>run($('fetch-history'),pullHistory);
+$('library-fetch').onclick=()=>run($('library-fetch'),pullHistory);
 
 $('login-form').onsubmit=event=>{event.preventDefault();run($('login-form').querySelector('[type=submit]'),async()=>{
  $('login-error').hidden=true;
@@ -289,10 +426,62 @@ $('login-form').onsubmit=event=>{event.preventDefault();run($('login-form').quer
  catch(error){$('login-error').textContent=error.message;$('login-error').hidden=false;throw error;}
 });};
 $('password-toggle').onclick=()=>{const input=$('login-password');input.type=input.type==='password'?'text':'password';$('password-toggle').setAttribute('aria-label',input.type==='password'?'显示密码':'隐藏密码');};
-$('retry-login').onclick=()=>run($('retry-login'),async()=>{if(S.forceLogin&&S.data?.authenticated){S.forceLogin=false;showPage('work');return;}await api('/api/auth/retry',{});await loadState();});
+$('retry-login').onclick=()=>{S.forceLogin=false;showPage('work');};
 $('login-capture').onclick=()=>showPage('capture');
-$('settings-login').onclick=()=>{if(boot.mode==='offline'){location.href='/';return;}S.forceLogin=true;$('retry-login').textContent=S.data.authenticated?'返回当前账号':'重试自动登录';showPage('work');};
-$('logout').onclick=()=>run($('logout'),async()=>{await api('/api/auth/logout',{});S.forceLogin=false;await loadState();showPage('work');toast('已清除本机密码和 token，路线与设置保留。');});
+$('settings-login').onclick=()=>{if(boot.mode==='offline'){location.href='/';return;}S.forceLogin=true;showPage('work');};
+function maskAccount(name){const text=String(name||'');return text.length>3?text[0]+'***'+text.slice(-2):(text||'—');}
+function renderLogin(){
+ if(!S.data)return;
+ const accounts=S.data.accounts||[];
+ const force=!!S.forceLogin&&!!S.data.authenticated;
+ $('login-title').textContent=force?'切换账号':'欢迎回来';
+ $('login-mode').textContent=force?`当前登录：${S.data.account||'已登录'}。登录其他账号会结束当前会话，点「返回当前账号」可以取消。`:'洛阳理工学院 · 云运动账号';
+ $('retry-login').hidden=!force;
+ const chips=accounts.map(account=>{
+  const button=document.createElement('button');button.type='button';button.className='account-chip';
+  button.title=account.username;button.disabled=!account.has_password;
+  const id=document.createElement('span');id.className='chip-id';id.textContent=maskAccount(account.username);
+  const action=document.createElement('span');action.className='chip-action';
+  action.textContent=account.has_password?'一键登录':'需输入密码';
+  button.append(id,action);
+  button.onclick=()=>loginSaved(account.username);
+  return button;
+ });
+ $('saved-accounts').hidden=!chips.length;
+ $('account-chips').replaceChildren(...chips);
+ const rows=accounts.map(account=>{
+  const row=document.createElement('div');row.className='account-row';
+  const name=document.createElement('code');name.textContent=account.username;
+  const meta=document.createElement('span');meta.className='muted';
+  meta.textContent=[account.source==='capture'?'抓包登录':'密码登录',account.has_password?'已保存密码':'无密码',account.has_token?'有会话':'无会话'].join(' · ');
+  const actions=document.createElement('div');actions.className='row';
+  const login=document.createElement('button');login.type='button';login.className='text-button';login.textContent='登录';
+  login.disabled=!account.has_password;login.onclick=()=>loginSaved(account.username);
+  const forget=document.createElement('button');forget.type='button';forget.className='text-button danger-text';forget.textContent='忘记';
+  forget.onclick=()=>forgetAccount(account.username);
+  actions.append(login,forget);row.append(name,meta,actions);return row;
+ });
+ $('account-list').hidden=!rows.length;
+ $('account-rows').replaceChildren(...rows);
+ const typed=$('login-user').value.trim();
+ const match=accounts.find(account=>account.username===typed&&account.has_password);
+ $('login-user').title=match?'这个学号已保存密码，可直接点上面的账号登录':'';
+}
+async function loginSaved(username){
+ await run($('account-chips'),async()=>{
+  const result=await api('/api/auth/login-saved',{username});
+  S.forceLogin=false;await loadState();
+  toast(result.warning?'已登录，规则同步需要重试：'+result.warning:'已用保存的密码登录。');
+ });
+}
+async function forgetAccount(username){
+ const yes=await modal('忘记这个账号？',`<p class="modal-description">会删除本机保存的 ${escape(maskAccount(username))} 的密码和 token；服务器上的跑步记录不受影响。</p>`,'忘记');
+ if(!yes)return;
+ await run(null,async()=>{await api('/api/auth/forget',{username});await loadState();toast('已删除本机保存的账号。');});
+}
+$('login-user').addEventListener('input',()=>{if(S.data)renderLogin();});
+$('logout').onclick=()=>run($('logout'),async()=>{await api('/api/auth/logout',{clear:true});S.forceLogin=false;await loadState();showPage('work');toast('已清除本机密码和 token，路线与设置保留。');});
+$('logout-keep').onclick=()=>run($('logout-keep'),async()=>{await api('/api/auth/logout',{clear:false});S.forceLogin=false;await loadState();showPage('work');toast('已退出登录；本机仍保留加密保存的密码，可一键重登。');});
 $('save-preferences').onclick=()=>run($('save-preferences'),async()=>{await api('/api/settings',{max_minutes:Number($('max-minutes').value)});await loadState();markDirty();toast('本地设置已保存。');});
 async function loadAdvanced(){
  try{const config=await api('/api/advanced');const box=$('advanced-config');box.replaceChildren();

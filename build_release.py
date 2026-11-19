@@ -11,9 +11,9 @@ from workbench import __version__
 ROOT=Path(__file__).resolve().parent
 VERSION=__version__
 FILES=['web.py','main.py','history.py','taskgen.py','yun_route.py','yun_http.py','yun_face.py',
-       'requirements.txt','requirements-build.txt','config.ini','README.md','AGENTS.md','build_release.py','build_exe.py','LICENSE','NOTICE.md','dry_run_home.json',
+       'requirements.txt','requirements-build.txt','config.ini','README.md','使用说明.md','AGENTS.md','build_release.py','build_exe.py','LICENSE','NOTICE.md','dry_run_home.json',
        '_launch.bat','.gitignore','启动联网面板.bat','启动独立工具.bat','0-检查环境.bat','1-抓token.bat','2-打开面板.bat']
-DIRECTORIES=['workbench','static','docs','examples','tasks_lylg','runtime','extras','tests','LICENSES']
+DIRECTORIES=['workbench','static','docs','examples','runtime','extras','tests','LICENSES']
 TOOLS=['tools/capture_bridge.py','tools/check_environment.py','tools/verify_exe.py','tools/verify_portable.py','tools/export_source.py','tools/__init__.py']
 LAUNCHERS=['启动联网面板.bat','启动独立工具.bat','抓包备用登录.bat','检查运行环境.bat']
 

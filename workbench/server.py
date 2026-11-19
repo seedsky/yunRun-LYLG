@@ -27,11 +27,12 @@ class Application:
         if demo:
             import taskgen
             write_json(self.store.data/'rules.json',{'fetched_at':'2026-11-10T00:00:00+08:00',
-              'tasks':[{'id':619,'schoolId':197,'raType':'T3','raName':'校园跑步 · 本地演示',
+              'tasks':[{'id':619,'schoolId':197,'campusName':'演示校区','raType':'T3','raName':'校园跑步 · 本地演示',
                 'raRunArea':'offline:demo','raSingleMileageMin':2,'raSingleMileageMax':5,
                 'raPaceMin':3,'raPaceMax':10,'raCadenceMin':35,'raCadenceMax':350,
                 'dayStartTime':'06:00','dayEndTime':'22:00','raDislikes':5,'raMinDislikes':3,
-                'points':'|'.join(f'{x},{y}' for x,y in taskgen.CARDS)}]})
+                'points':'|'.join(f'{x},{y}' for x,y in taskgen.CARDS),
+                'fence':'|'.join(f'{x},{y}' for x,y in taskgen.FENCE)}]})
             self.store.save_settings({'task_id':'619'})
             self.auth.authenticated=True;self.auth.restore_attempted=True
 
@@ -53,6 +54,7 @@ class Application:
         return {'mode':mode,'demo':self.demo,'settings':settings,'authenticated':self.auth.authenticated,
                 'session':{'has_token':bool(credentials.get('token')),'has_password':bool(credentials.get('password')),
                            'source':credentials.get('session_source','existing')},
+                'accounts':self.store.accounts(),
                 'account':(name[:1]+'***'+name[-2:]) if name else ('演示账号' if self.demo else '抓包登录'),
                 'auth_error':self.auth.error,'rules':visible_rules,
                 'sources':self.routes.public_sources(),'job':job,'preview':preview}
@@ -76,19 +78,35 @@ class Application:
                 except Exception as exc:warning=self.store.safe_message(exc)
                 return {'authenticated':True,'warning':warning}
             if path=='/api/auth/retry':
-                self.network(mode);self.auth.restore_attempted=False;self.auth.relogin_attempt_token=None;self.auth.restore()
+                self.network(mode);self.store.save_settings({'autologin':True})
+                self.auth.restore_attempted=False;self.auth.relogin_attempt_token=None;self.auth.restore()
                 if not self.auth.authenticated:raise ValueError(self.auth.error or '自动登录失败。')
                 return {'authenticated':True}
-            if path=='/api/auth/logout':self.auth.logout();return {'ok':True}
+            if path=='/api/auth/logout':
+                # clear=False：只退出会话，保留加密保存的密码供下次快捷登录。
+                self.auth.logout(clear=bool(data.get('clear',True)));return {'ok':True}
+            if path=='/api/auth/login-saved':
+                self.network(mode);self.auth.login_saved(data.get('username'))
+                try:self.auth.refresh();warning=''
+                except Exception as exc:warning=self.store.safe_message(exc)
+                return {'authenticated':True,'warning':warning}
+            if path=='/api/auth/forget':
+                self.auth.forget(data.get('username'));return {'ok':True}
             if path=='/api/rules/refresh':self.network(mode);self.auth.refresh();return rules.view(self.store)
             if path=='/api/tasks/select':
                 task_id=str(data.get('id',''))
                 if not any(str(t.get('id'))==task_id for t in rules.cached(self.store)['tasks']):raise ValueError('任务已失效，请重新获取。')
                 self.store.save_settings({'task_id':task_id});return rules.view(self.store)
+            if path=='/api/rules/limits':
+                # 本地检查：按任务保存开关与改过的范围；只影响本地校验，不改服务器数据。
+                rules.save_limits(self.store,data.get('task_id'),bool(data.get('enabled',True)),data.get('values') or {})
+                return rules.view(self.store)
             if path=='/api/routes/generate':
                 result=self.routes.generate(data)
                 safe={k:v for k,v in data.items() if k in ('source','km','pace','cadence','amp','sample_seconds','seed','deform')}
-                self.store.save_settings({'defaults':safe})
+                # 合并而不是覆盖：fast 等界面开关不会被一次生成清掉。
+                defaults=dict(self.store.settings().get('defaults') or {});defaults.update(safe)
+                self.store.save_settings({'defaults':defaults})
                 return result
             if path=='/api/routes/preview':return self.routes.preview(data.get('source_id'),data.get('uploaded'),data.get('params'))
             if path=='/api/routes/save':return self.routes.save(data.get('id'),data.get('name'))
@@ -140,6 +158,8 @@ class Application:
         self.network(mode)
         if not self.auth.authenticated:raise ValueError('请先登录。')
         client=self.auth.client();limit=max(1,min(200,int(data.get('limit',20))))
+        # 下载的历史路线属于当前登录账号，文件名与路线记录都带上来源学号，换号后不会混。
+        account=str(self.store.settings().get('account_name') or self.store.credentials().get('username') or '')
         terms=client.post_json('/run/listXnYearXqByStudentId','',raise_on_business_code=True).get('data') or []
         total=0
         for term in terms:
@@ -149,9 +169,10 @@ class Application:
                 for run in month.get('rankList') or []:
                     detail=client.post_json('/run/crsReocordInfo',json.dumps({'id':run.get('id'),'tableName':table}),raise_on_business_code=True)
                     from .routes import label
-                    name=label('历史 '+str((detail.get('data') or {}).get('recordStartTime') or run.get('id')))
+                    start=str((detail.get('data') or {}).get('recordStartTime') or run.get('id'))
+                    name=label(' · '.join(part for part in ('历史',account,start) if part))
                     # 规范化后再存盘，避免把详情中的个人资料写进路线库与备份。
-                    self.routes.import_route(detail,name,'history');total+=1
+                    self.routes.import_route(detail,name,'history',account=account);total+=1
                     if total>=limit:return {'count':total}
         return {'count':total}
 

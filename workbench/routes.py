@@ -17,7 +17,7 @@ import threading
 import uuid
 import taskgen
 import yun_route
-from .storage import ROOT, read_json, write_json
+from .storage import read_json, write_json
 from . import rules
 
 
@@ -68,17 +68,18 @@ class Routes:
         for name in ('routes', 'history', 'previews'): (store.data / name).mkdir(exist_ok=True)
 
     def sources(self):
+        """个人路线库与已下载历史；不再内置其他校区的任务表。"""
         out = []
-        for kind, folder, pattern in [('sample', ROOT/'tasks_lylg', '*.json'),
-                                      ('library', self.store.data/'routes', '*.json'),
+        for kind, folder, pattern in [('library', self.store.data/'routes', '*.json'),
                                       ('history', self.store.data/'history', '*.json')]:
             for path in sorted(folder.glob(pattern)):
                 try:
                     obj = read_json(path)
                     points = coordinates(obj)
                     name = obj.get('name') or path.stem
+                    account = label(obj.get('account') or '') if obj.get('account') else ''
                     out.append({'id': kind+'/'+path.stem, 'name': label(name), 'kind': kind,
-                                'points': len(points), 'path': path})
+                                'account': account, 'points': len(points), 'path': path})
                 except (ValueError, TypeError, KeyError): continue
         return out
 
@@ -92,18 +93,22 @@ class Routes:
 
     @contextmanager
     def geometry(self):
-        """旧几何模块使用全局常量；串行设置并恢复，防止两个页面串用任务点。"""
+        """旧几何模块使用全局常量；串行设置并恢复，防止两个页面串用任务点。
+
+        几何只来自当前所选任务（rules.venue）：点位、围栏、要求同源。有任务但未
+        选择时明确报错，不猜场地；只有完全没有服务器任务时才用本地示例。
+        """
         with self.lock:
             old_cards, old_fence = taskgen.CARDS, taskgen.FENCE
-            latest = rules.view(self.store)['points']
-            taskgen.CARDS = [tuple(p) for p in latest] or list(old_cards)
-            fence = read_json(ROOT/'examples/routes/fence_lylg.geojson')
-            geom = fence.get('geometry') or fence
-            if fence.get('type') == 'FeatureCollection': geom = fence['features'][0]['geometry']
-            taskgen.FENCE = [tuple(p) for p in geom['coordinates'][0]]
-            if taskgen.FENCE[-1] == taskgen.FENCE[0]: taskgen.FENCE = taskgen.FENCE[:-1]
-            try: yield
-            finally: taskgen.CARDS, taskgen.FENCE = old_cards, old_fence
+            space = rules.venue(self.store)
+            if space['source'] == 'unselected':
+                raise ValueError('当前账号有多个打卡区域，请先在页面上选择一个再生成路线。')
+            taskgen.CARDS = [tuple(p) for p in space['cards']]
+            taskgen.FENCE = [tuple(p) for p in space['fence']]
+            try:
+                yield space
+            finally:
+                taskgen.CARDS, taskgen.FENCE = old_cards, old_fence
 
     def normalize(self, obj, pace=5.5, cadence=170):
         """保留原有坐标/时间轴，剔除记录 ID、学生资料等与路线无关的身份字段。"""
@@ -134,7 +139,8 @@ class Routes:
                   for i,c in enumerate(taskgen.visited_cards(pts))]
         return {'code':200,'msg':'本地路线','data':{'pointsList':clean,
             'recordMileage':last_m/1000, 'duration':last_t, 'recodePace':last_t/60/(last_m/1000),
-            'recodeCadence':last_s*60/last_t, 'manageList':manage,'recodeDislikes':len(manage),'schoolId':197}}, False
+            'recodeCadence':last_s*60/last_t, 'manageList':manage,'recodeDislikes':len(manage),
+            'schoolId':str((rules.selected(self.store) or {}).get('schoolId') or 197)}}, False
 
     def metrics(self, task):
         d = task['data']
@@ -163,10 +169,11 @@ class Routes:
         return task
 
     def generate(self, params):
-        with self.geometry():
+        with self.geometry() as space:
             km, pace, cadence = (float(params.get(k, default)) for k,default in [('km',2),('pace',5.5),('cadence',170)])
             if not all(math.isfinite(n) and n>0 for n in (km,pace,cadence)): raise ValueError('里程、配速和步频必须为有效正数。')
-            errors=rules.validate(self.store, {'km':km,'pace':pace,'cadence':cadence,'duration':km*pace*60})
+            issues=rules.validate(self.store, {'km':km,'pace':pace,'cadence':cadence,'duration':km*pace*60})
+            errors=[issue for issue in issues if issue['level']!='notice']
             if errors: raise RouteConflict(errors)
             amp=float(params.get('amp',1))
             interval=int(params.get('sample_seconds',2))
@@ -174,7 +181,12 @@ class Routes:
             fixed_seed=str(params.get('seed','')).strip()
             seed=int(fixed_seed) if fixed_seed else random.SystemRandom().randrange(1,2**31)
             source=params.get('source','synth')
+            # 没有区域范围就不生成：宁可停下，也不让路线跑到区域外。
+            if not space['fence']:
+                raise ValueError('当前任务没有下发围栏（区域范围），无法校验路线，已停止生成；请先同步规则。')
             if source=='synth':
+                if not space['cards']:
+                    raise ValueError('当前任务没有下发打卡点，无法合成路线；可改用已有路线或手绘。')
                 for attempt in range(12 if not fixed_seed else 1):
                     try:
                         pts,total,_,order=taskgen.synth(km*1000,pace,cadence,seed+attempt,cards_min=len(taskgen.CARDS))
@@ -192,7 +204,7 @@ class Routes:
                 else: raise ValueError('未知路线来源。')
                 if any(not taskgen.inside(p,taskgen.FENCE) for p in pts):
                     raise ValueError('路线包含围栏外的点，请修改手绘路线或关闭来源形变；没有自动移动坐标。')
-                pts=taskgen.densify(taskgen.snap_cards(pts))
+                pts=taskgen.densify(taskgen.snap_cards(pts) if space['cards'] else pts)
                 if taskgen.plen(pts)<km*1000:
                     base=list(pts)
                     for i in range(40):
@@ -202,9 +214,13 @@ class Routes:
                 if total<km*1000-1: raise ValueError('来源路线过短，请增加手绘长度或减小目标里程。')
                 order=taskgen.visited_cards(pts)
                 need=int((rules.selected(self.store) or {}).get('raMinDislikes') or 3)
-                if len(order)<need: raise ValueError(f'当前长度仅经过 {len(order)} 个打卡点，需至少 {need} 个；请调整路线，未自动增加里程。')
+                if space['cards'] and len(order)<need:
+                    raise ValueError(f'当前长度仅经过 {len(order)} 个打卡点，需至少 {need} 个；请调整路线，未自动增加里程。')
             task=taskgen.to_task(pts,total,pace,cadence,order,random.Random(seed),amp=amp,cad_lo=cadence,cad_hi=cadence)
             task=self._sample(task,interval)
+            outside=sum(1 for point in coordinates(task) if not taskgen.inside(point,taskgen.FENCE))
+            if outside:
+                raise ValueError(f'路线有 {outside} 个点落在当前区域之外，已停止生成；请减小目标里程或换一条来源。')
             return self._preview(task,dict(params,seed=seed),False)
 
     def preview(self, source_id=None, uploaded=None, params=None):
@@ -212,6 +228,10 @@ class Routes:
             obj,name=(uploaded,'导入路线') if uploaded is not None else self.source(source_id)
             params=params or {}
             task,estimated=self.normalize(obj,float(params.get('pace',5.5)),float(params.get('cadence',170)))
+            if taskgen.FENCE:
+                outside=sum(1 for point in coordinates(task) if not taskgen.inside(point,taskgen.FENCE))
+                if outside:
+                    raise ValueError(f'这条路线有 {outside} 个点落在当前区域之外，请换一条或先切换打卡区域。')
             return self._preview(task,dict(params,source_id=source_id or '',name=name),estimated)
 
     def _preview(self, task, params, estimated):
@@ -225,10 +245,17 @@ class Routes:
         task['data']['manageList']=manage
         task['data']['recodeDislikes']=len(manage)
         task.setdefault('metadata',{})['coordinate_system']='GCJ-02'
+        # 快照连同生成时的场地与检查结果一起保存：切任务后这份预览仍显示它自己的围栏。
+        space=rules.venue(self.store)
+        venue={'cards':[list(p) for p in taskgen.CARDS],'fence':[list(p) for p in taskgen.FENCE],
+               'source':space['source'],'task_id':space['task_id'],'name':space['name'],
+               'campus':space['campus'],'points_status':space['points_status'],
+               'fence_status':space['fence_status']}
         preview_id=uuid.uuid4().hex
         item={'id':preview_id,'task':task,'params':params,'task_id':rules.view(self.store)['selected_id'],
-              'reference_cards':list(taskgen.CARDS),
+              'reference_cards':list(taskgen.CARDS),'reference_fence':list(taskgen.FENCE),'venue':venue,
               'digest':digest(task),'created_at':datetime.now().isoformat(),'estimated':estimated}
+        item['issues']=rules.validate(self.store,self.metrics(task))
         self.previews[preview_id]=item
         while len(self.previews)>24: self.previews.pop(next(iter(self.previews)))
         write_json(self.store.data/'previews'/f'{preview_id}.json',item)
@@ -237,13 +264,18 @@ class Routes:
 
     def public(self, item):
         task=item['task'];d=task['data']; points=coordinates(task)
-        with self.geometry():
-            fence, cards=list(taskgen.FENCE),list(taskgen.CARDS)
+        venue=item.get('venue') or {}
+        fence=[list(p) for p in (venue.get('fence') or [])]
+        cards=[list(p) for p in (venue.get('cards') or [])]
+        issues=item.get('issues')
+        current=rules.view(self.store)['selected_id']
+        if issues is None or (item.get('task_id') and item.get('task_id')==current):
+            # 同一任务的检查范围可能被用户改过：以当前范围重算；换了任务则保留生成时的结论。
+            issues=rules.validate(self.store,self.metrics(task));item['issues']=issues
         return {'id':item['id'],'digest':item['digest'],'task_id':item['task_id'],'metrics':self.metrics(task),
             'coordinates':points,'paces':[float(p.get('speed') or 0) for p in d['pointsList']],
             'times':[int(p['runTime']) for p in d['pointsList']], 'params':item['params'],'estimated':item['estimated'],
-            'issues':rules.validate(self.store,self.metrics(task)),
-            'fence':fence,'cards':cards}
+            'issues':issues,'fence':fence,'cards':cards,'venue':venue}
 
     def get(self, preview_id):
         with self.lock:
@@ -265,12 +297,13 @@ class Routes:
                        {'version':1,'name':name,'task':item['task'],'params':item['params']})
             return {'id':'library/'+route_id,'name':name}
 
-    def import_route(self, obj, name, kind='library'):
+    def import_route(self, obj, name, kind='library', account=''):
         with self.geometry():
             task,_=self.normalize(obj)
             folder='routes' if kind=='library' else 'history'
             route_id=uuid.uuid4().hex
-            write_json(self.store.data/folder/f'{route_id}.json',{'version':1,'name':label(name),'task':task})
+            write_json(self.store.data/folder/f'{route_id}.json',
+                       {'version':1,'name':label(name),'account':label(account)[:60] if account else '','task':task})
             return {'id':('library' if folder=='routes' else 'history')+'/'+route_id,'name':label(name)}
 
     def export(self, source_id, geojson=False):

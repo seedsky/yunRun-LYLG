@@ -23,10 +23,11 @@ class WorkbenchTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(prefix='yunrun-test-')
         self.addCleanup(self.temp.cleanup)
         self.store=Store(Path(self.temp.name))
-        self.task={'id':619,'schoolId':197,'raType':'T3','raRunArea':'offline:test',
+        self.task={'id':619,'schoolId':197,'campusId':'1890310131181043717','raType':'T3','raRunArea':'offline:test',
           'raSingleMileageMin':2,'raSingleMileageMax':5,'raPaceMin':3,'raPaceMax':10,
           'raCadenceMin':35,'raCadenceMax':350,'dayStartTime':'00:00','dayEndTime':'23:59',
-          'raDislikes':5,'raMinDislikes':3,'points':'|'.join(f'{x},{y}' for x,y in taskgen.CARDS)}
+          'raDislikes':5,'raMinDislikes':3,'points':'|'.join(f'{x},{y}' for x,y in taskgen.CARDS),
+          'fence':'|'.join(f'{x},{y}' for x,y in taskgen.FENCE)}
         write_json(self.store.data/'rules.json',{'tasks':[self.task],'fetched_at':'2026-11-10T00:00:00+08:00'})
         self.store.save_settings({'task_id':'619'})
         self.routes=Routes(self.store)
@@ -206,6 +207,179 @@ class WorkbenchTests(unittest.TestCase):
         self.addCleanup(lambda:proc.terminate() if proc.poll() is None else None)
         family.attach(proc);family.close()
         self.assertIsNotNone(proc.wait(timeout=5))
+
+    def test_history_routes_keep_their_account(self):
+        preview=self.preview()
+        task=self.routes.get(preview['id'])['task']
+        self.routes.import_route(task,'历史 · DEMO001 · 2026-11-19 13:20','history',account='DEMO001')
+        item=next(i for i in self.routes.sources() if i['kind']=='history')
+        self.assertEqual(item['account'],'DEMO001')
+        self.assertIn('DEMO001',item['name'])
+
+    def test_multiple_accounts_are_kept_and_switchable(self):
+        auth=Auth(self.store)
+        self.store.save_credentials({'username':'DEMO001','password':'pw1','token':'t1'})
+        self.store.save_credentials({'username':'DEMO002','password':'pw2','token':'t2'})
+        self.assertEqual([item['username'] for item in self.store.accounts()],['DEMO002','DEMO001'])
+        self.assertEqual(self.store.credentials()['username'],'DEMO002')
+        self.assertEqual(self.store.credentials_for('DEMO001')['password'],'pw1')
+        calls=[]
+        with patch.object(auth,'login',side_effect=lambda u,p:calls.append((u,p))):
+            auth.login_saved('DEMO001')
+        self.assertEqual(calls,[('DEMO001','pw1')])
+        with self.assertRaises(ValueError):
+            auth.login_saved('DEMO404')
+
+    def test_logout_keep_only_drops_current_session(self):
+        auth=Auth(self.store)
+        self.store.save_credentials({'username':'DEMO001','password':'pw1','token':'t1'})
+        self.store.save_credentials({'username':'DEMO002','password':'pw2','token':'t2'})
+        auth.logout(clear=False)
+        self.assertNotIn('token',self.store.credentials_for('DEMO002'))
+        self.assertEqual(self.store.credentials_for('DEMO002')['password'],'pw2')
+        self.assertEqual(self.store.credentials_for('DEMO001')['token'],'t1')
+        self.assertEqual(len(self.store.accounts()),2)
+
+    def test_forget_removes_one_account(self):
+        auth=Auth(self.store)
+        self.store.save_credentials({'username':'DEMO001','password':'pw1','token':'t1'})
+        self.store.save_credentials({'username':'DEMO002','password':'pw2'})
+        auth.forget('DEMO001')
+        self.assertEqual([item['username'] for item in self.store.accounts()],['DEMO002'])
+        self.assertEqual(self.store.credentials()['username'],'DEMO002')
+        auth.forget('DEMO002')
+        self.assertEqual(self.store.accounts(),[])
+        self.assertEqual(self.store.credentials(),{})
+
+    def test_legacy_single_account_file_is_migrated(self):
+        from workbench.storage import _crypt, atomic_bytes
+        legacy={'username':'DEMO001','password':'pw1','token':'t1','device_id':'dev'}
+        atomic_bytes(self.store.credentials_path,_crypt(json.dumps(legacy).encode()))
+        self.assertEqual(self.store.credentials()['password'],'pw1')
+        self.assertEqual(self.store.credentials()['device_id'],'dev')
+        self.assertEqual([item['username'] for item in self.store.accounts()],['DEMO001'])
+
+    def test_logout_can_keep_saved_password_for_quick_login(self):
+        auth=Auth(self.store)
+        self.store.save_credentials({'username':'DEMO001','password':'only-for-fixture','token':'NOT-A-REAL-TOKEN'})
+        auth.authenticated=True
+        auth.logout(clear=False)
+        cred=self.store.credentials()
+        self.assertNotIn('token',cred)
+        self.assertEqual(cred['password'],'only-for-fixture')
+        self.assertFalse(self.store.settings()['autologin'])
+        # 退出后不会在下次刷新时自动登回去。
+        auth.restore_attempted=False;auth.restore()
+        self.assertFalse(auth.authenticated)
+        # 点「重试自动登录」才会用保存的密码重新登录。
+        calls=[]
+        with patch.object(auth,'login',side_effect=lambda u,p:(calls.append((u,p)),setattr(auth,'authenticated',True))):
+            self.store.save_settings({'autologin':True})
+            auth.restore_attempted=False;auth.restore()
+        self.assertEqual(calls,[('DEMO001','only-for-fixture')])
+
+    def test_clear_logout_removes_everything(self):
+        auth=Auth(self.store)
+        self.store.save_credentials({'username':'DEMO001','password':'only-for-fixture'})
+        auth.logout(clear=True)
+        self.assertFalse(self.store.credentials_path.exists())
+        self.assertFalse(self.store.settings()['autologin'])
+
+    def test_view_exposes_raw_server_fields_without_identity(self):
+        view=rules.view(self.store)
+        keys={row['key'] for row in view['raw']}
+        self.assertIn('raRunArea',keys)
+        self.assertIn('raSingleMileageMin',keys)
+        for hidden in ('points','fence','schoolId'):
+            self.assertNotIn(hidden,keys)
+
+    def test_venue_follows_selected_task(self):
+        """王城场景：同校两个打卡区域各有围栏和点位，选中哪个就用哪个。"""
+        def shift(dx):
+            return ([[x+dx,y] for x,y in taskgen.CARDS],[[x+dx,y] for x,y in taskgen.FENCE])
+        east_cards,east_fence=shift(.004);west_cards,west_fence=shift(-.004)
+        east=dict(self.task,id=620,raName='东操场',campusName='王城',
+                  points='|'.join(f'{x},{y}' for x,y in east_cards),fence='|'.join(f'{x},{y}' for x,y in east_fence))
+        west=dict(self.task,id=622,raName='西操场',campusName='王城',
+                  points=west_cards,fence=west_fence)   # 数组编码同样要能识别
+        write_json(self.store.data/'rules.json',{'tasks':[east,west],'fetched_at':'2026-11-10T00:00:00+08:00'})
+        self.store.save_settings({'task_id':''})
+        # 多任务未选择：不猜场地，也不允许生成。
+        self.assertEqual(rules.view(self.store)['source'],'unselected')
+        self.assertEqual(rules.view(self.store)['fence'],[])
+        with self.assertRaises(ValueError):self.routes.generate({'source':'synth','km':2,'seed':7})
+        # 选中东操场：地图数据与预览围栏都换成东操场。
+        self.store.save_settings({'task_id':'620'})
+        view=rules.view(self.store)
+        self.assertEqual(view['fence'],east_fence);self.assertEqual(view['points'],east_cards)
+        self.assertEqual(view['campus'],'王城')
+        east_preview=self.routes.generate({'source':'synth','km':2,'seed':7})
+        self.assertEqual(east_preview['fence'],east_fence)
+        self.assertTrue(all(taskgen.inside(p,east_fence) for p in east_preview['coordinates']))
+        # 切到西操场：数组编码的围栏同样生效，旧预览不能再演练或执行。
+        self.store.save_settings({'task_id':'622'})
+        west_preview=self.routes.generate({'source':'synth','km':2,'seed':7})
+        self.assertEqual(west_preview['fence'],west_fence)
+        self.assertTrue(all(taskgen.inside(p,west_fence) for p in west_preview['coordinates']))
+        self.store.save_settings({'task_id':'620'})
+        family=ProcessFamily();self.addCleanup(family.close)
+        with self.assertRaises(ValueError):
+            Jobs(self.store,Auth(self.store),self.routes,family).start(west_preview['id'],dry=True,mode='offline')
+
+    def test_local_check_is_per_task_and_switchable(self):
+        self.store.save_settings({'task_id':'619'})
+        limits=rules.save_limits(self.store,'619',True,{'km_min':3})
+        self.assertTrue(limits['customized']);self.assertEqual(limits['values']['km_min'],3)
+        issues=rules.validate(self.store,{'km':2,'pace':5.5,'cadence':170,'duration':660})
+        self.assertEqual([i['level'] for i in issues],['error'])
+        with self.assertRaises(RouteConflict):self.routes.generate({'source':'synth','km':2,'seed':7})
+        # 关闭本地检查：同样的越界只给提示，不拦截生成。
+        rules.save_limits(self.store,'619',False,{'km_min':3})
+        preview=self.routes.generate({'source':'synth','km':2,'seed':7})
+        self.assertEqual([i['level'] for i in preview['issues']],['notice'])
+        # 另一个任务不受影响。
+        write_json(self.store.data/'rules.json',{'tasks':[self.task,dict(self.task,id=620)]})
+        self.assertEqual(rules.limits(self.store,'620')['values']['km_min'],2)
+        self.assertFalse(rules.limits(self.store,'620')['customized'])
+
+    def test_invalid_local_check_values_are_rejected(self):
+        self.store.save_settings({'task_id':'619'})
+        for values in ({'km_min':5,'km_max':2},{'start':'25:00'},{'pace_min':-1},{'unknown':1}):
+            with self.subTest(values=values),self.assertRaises(ValueError):
+                rules.save_limits(self.store,'619',True,values)
+        with self.assertRaises(ValueError):
+            rules.save_limits(self.store,'999',True,{'km_min':1})
+        self.assertEqual(rules.limits(self.store,'619')['values']['km_min'],2)
+
+    def test_routes_from_another_area_are_rejected(self):
+        """东操场的路线不能在西操场的区域里生成或预览。"""
+        east=dict(self.task,id=620,raName='东操场',
+                  points='|'.join(f'{x+.004},{y}' for x,y in taskgen.CARDS),
+                  fence='|'.join(f'{x+.004},{y}' for x,y in taskgen.FENCE))
+        west=dict(self.task,id=622,raName='西操场',
+                  points='|'.join(f'{x-.004},{y}' for x,y in taskgen.CARDS),
+                  fence='|'.join(f'{x-.004},{y}' for x,y in taskgen.FENCE))
+        write_json(self.store.data/'rules.json',{'tasks':[east,west]})
+        self.store.save_settings({'task_id':'620'})
+        saved=self.routes.save(self.routes.generate({'source':'synth','km':2,'seed':7})['id'],'东操场路线')
+        self.store.save_settings({'task_id':'622'})
+        with self.assertRaises(ValueError) as raised:
+            self.routes.generate({'source':'library','source_id':saved['id'],'km':2,'seed':7})
+        self.assertIn('围栏外',str(raised.exception))
+        with self.assertRaises(ValueError):
+            self.routes.preview(saved['id'])
+
+    def test_missing_fence_is_reported_not_borrowed(self):
+        task=dict(self.task);task.pop('fence')
+        write_json(self.store.data/'rules.json',{'tasks':[task]})
+        self.store.save_settings({'task_id':'619'})
+        view=rules.view(self.store)
+        self.assertEqual(view['fence'],[]);self.assertEqual(len(view['points']),6)
+        with self.assertRaises(ValueError) as raised:self.routes.generate({'source':'synth','km':2,'seed':7})
+        self.assertIn('没有下发围栏',str(raised.exception))
+
+    def test_route_sources_have_no_builtin_samples(self):
+        self.assertTrue(all(item['kind'] in ('library','history') for item in self.routes.sources()))
 
     def test_capture_generates_current_ca_and_serves_only_public_files(self):
         from workbench.capture import Capture

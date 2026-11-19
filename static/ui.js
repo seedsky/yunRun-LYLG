@@ -26,6 +26,7 @@ const paths = {
  terminal:'m5 7 5 5-5 5m8 0h6M2 3h20v18H2V3Z',
  expand:'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',
  download:'M12 3v12m-5-5 5 5 5-5M3 16v5h18v-5',
+ image:'M4 4h16v16H4V4Zm2 12 3.5-4.5L13 16l2.5-3L18 17H6Zm4.5-7a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z',
  upload:'M12 16V4m-5 5 5-5 5 5M3 16v5h18v-5',
  plus:'M12 4v16M4 12h16',
  pen:'m4 16 12-12 4 4L8 20H4v-4Zm10-10 4 4',

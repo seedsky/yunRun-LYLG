@@ -88,27 +88,39 @@ class Jobs:
                     raise ValueError('任务选择已变化，请按当前任务重新预览。')
                 if snapshot.get('reference_cards') and digest(snapshot['reference_cards'])!=digest(rules.view(self.store)['points']):
                     raise ValueError('服务器打卡点已变化，请重新生成或预览当前路线。')
+                if snapshot.get('reference_fence') and digest(snapshot['reference_fence'])!=digest(rules.view(self.store)['fence']):
+                    raise ValueError('服务器围栏已变化，请重新生成或预览当前路线。')
             metrics=self.routes.metrics(snapshot['task'])
             issues=rules.validate(self.store,metrics,formal=not dry)
-            if issues: raise RouteConflict(issues)
-            with self.routes.geometry():
+            errors=[issue for issue in issues if issue['level']!='notice']
+            if errors: raise RouteConflict(errors)
+            with self.routes.geometry() as space:
                 import taskgen
                 pts=coordinates(snapshot['task'])
-                if any(not taskgen.inside(p,taskgen.FENCE) for p in pts): raise ValueError('预览路线存在围栏外坐标，不能执行。')
+                if space['fence'] and any(not taskgen.inside(p,taskgen.FENCE) for p in pts):
+                    raise ValueError('预览路线存在当前任务围栏外的坐标，不能执行。')
                 selected=rules.selected(self.store) or {}
-                required=max(int(selected.get('raDislikes') or 0),int(selected.get('raMinDislikes') or 0))
+                required=(max(int(selected.get('raDislikes') or 0),int(selected.get('raMinDislikes') or 0))
+                          if space['cards'] else 0)
                 visited=taskgen.visited_cards(pts)
                 if not dry and len(visited)<required:
                     raise ValueError(f'最新打卡点校验：命中 {len(visited)} 个，现有执行引擎要求 {required} 个，请重新生成。')
                 cards='|'.join(f'{x},{y}' for x,y in taskgen.CARDS)
+                venue={'cards':[list(p) for p in space['cards']],'fence':[list(p) for p in space['fence']],
+                       'source':space['source'],'task_id':space['task_id'],
+                       'points_status':space['points_status'],'fence_status':space['fence_status']}
+                if snapshot.get('venue') and digest(
+                        {'cards':snapshot['venue'].get('cards'),'fence':snapshot['venue'].get('fence')}) != digest(
+                        {'cards':venue['cards'],'fence':venue['fence']}):
+                    raise ValueError('任务的点位或围栏已变化，请重新生成路线后再执行。')
             home_task=rules.selected(self.store)
             if dry:
-                home_task={'id':619,'schoolId':197,'raType':'T3','raRunArea':'offline:fixture',
+                home_task={'id':619,'schoolId':(selected or {}).get('schoolId',197),'raType':'T3','raRunArea':'offline:fixture',
                            'raDislikes':0,'raMinDislikes':0,'raSingleMileageMin':0.001,'raSingleMileageMax':100,
                            'raCadenceMin':1,'raCadenceMax':1000,'points':cards,'runFaceStatus':'N','passPointNum':60}
             job_id=uuid.uuid4().hex
             folder=self.store.data/'jobs'/job_id
-            write_json(folder/'snapshot.json',dict(snapshot,home=home_task,dry=bool(dry),fast=bool(fast)))
+            write_json(folder/'snapshot.json',dict(snapshot,home=home_task,dry=bool(dry),fast=bool(fast),venue=venue))
             write_json(folder/'task_pick'/'tasklist_0.json',snapshot['task'])
             self.state={'id':job_id,'status':'starting','dry':bool(dry),'fast':bool(fast),
                         'duration':metrics['duration'],'elapsed':0,'confirmed_m':0,'record_id':None,
